@@ -85,17 +85,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       {/* --- FLOATING LEFT STACK: WEATHER & MATCH INSIGHTS --- */}
 
       <div className="absolute top-20 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
-        
-        {/* MANUAL GPS TRIGGER BUTTON (Disappears once active) */}
-        {!isTracking && !userLocation && (
-          <button 
-            onClick={requestLocation}
-            className="pointer-events-auto bg-blue-600 hover:bg-blue-500 text-white font-black uppercase tracking-widest text-[9px] py-2.5 px-3 rounded-xl shadow-[0_0_15px_rgba(37,99,235,0.4)] border border-blue-500 transition-all flex items-center justify-center gap-2 animate-bounce"
-          >
-            <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-            Lock GPS Signal
-          </button>
-        )}
+       
         
         {/* Minimal Weather Block */}
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2 px-3 flex items-center justify-between shadow-lg pointer-events-auto">
