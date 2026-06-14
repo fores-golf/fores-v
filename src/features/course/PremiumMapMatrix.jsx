@@ -73,80 +73,74 @@ export default function PremiumMapMatrix({ holeData, onLogScoreClick }) {
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in">
       
-      {/* --- TOP MAP OVERLAYS --- */}
-      <div className="absolute top-4 left-4 right-4 z-[400] flex justify-between items-start pointer-events-none">
-        
-        {/* Weather Status */}
-        <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 rounded-2xl p-3 flex items-center gap-4 shadow-lg pointer-events-auto min-w-[120px]">
+      {/* --- FLOATING CONTEXT FLAPS (LEFT & RIGHT) --- */}
+      <div className="absolute top-20 left-4 z-[400] pointer-events-none flex flex-col gap-2">
+        {/* Left Hand Weather Display */}
+        <div className="bg-slate-900/70 backdrop-blur-md border border-slate-800/80 rounded-xl p-2 px-3 flex items-center gap-3 shadow-lg pointer-events-auto">
           {weather ? (
-            <>
-              <div className="flex flex-col items-center border-r border-slate-700/50 pr-4">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Wind</span>
-                <div className="flex items-center text-emerald-400 gap-1">
-                  <span className="text-lg font-black">{weather.windSpeed}</span>
-                  <span className="text-[10px]">MPH</span>
-                  <svg style={{ transform: `rotate(${weather.windDeg}deg)` }} className="w-3 h-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19V5m0 0l-4 4m4-4l4 4" /></svg>
-                </div>
+            <div className="flex items-center gap-2 font-mono">
+              <span className="text-[10px] font-black text-slate-200">{weather.temp}°F</span>
+              <div className="w-px h-3 bg-slate-700" />
+              <div className="flex items-center text-emerald-400 text-[10px] font-black gap-0.5">
+                <span>{weather.windSpeed}</span>
+                <span className="text-[8px] opacity-70">MPH</span>
+                <svg style={{ transform: `rotate(${weather.windDeg}deg)` }} className="w-2.5 h-2.5 ml-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 19V5m0 0l-4 4m4-4l4 4" /></svg>
               </div>
-              <div className="flex flex-col">
-                <span className="text-lg font-black text-white">{weather.temp}°</span>
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{weather.condition}</span>
-              </div>
-            </>
+            </div>
           ) : (
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 px-2 animate-pulse">Radar...</span>
+            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest animate-pulse">Sensors...</span>
           )}
-        </div>
-
-        {/* Action Controls Column */}
-        <div className="flex flex-col gap-2 items-end pointer-events-auto">
-          {/* THE LOG SCORE BUTTON */}
-          <button 
-            onClick={onLogScoreClick}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl font-black uppercase tracking-widest text-xs shadow-lg transition-colors border border-emerald-500"
-          >
-            Log Score
-          </button>
-
-          <div className="bg-slate-900/80 backdrop-blur-sm border border-slate-700/50 rounded-xl flex overflow-hidden shadow-lg">
-            <button onClick={() => setMapType('satellite')} className={`px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors ${mapType === 'satellite' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Sat</button>
-            <button onClick={() => setMapType('topo')} className={`px-4 py-2 text-xs font-black uppercase tracking-widest transition-colors border-l border-slate-700/50 ${mapType === 'topo' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>Topo</button>
-          </div>
-          
-          <button 
-            onClick={() => setShotOrigin(shotOrigin ? null : userLocation)}
-            className={`px-4 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl shadow-lg border transition-colors ${shotOrigin ? 'bg-orange-500/20 border-orange-500 text-orange-400' : 'bg-slate-900/80 border-slate-700/50 text-slate-400'}`}
-          >
-            {shotOrigin ? `Shot: ${driveDistance}y` : 'Mark Shot'}
-          </button>
         </div>
       </div>
 
-      {/* --- LEAFLET ENGINE --- */}
+      <div className="absolute top-20 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
+        {/* Right Hand Tool Tree */}
+        <button 
+          onClick={onLogScoreClick}
+          className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95"
+        >
+          Log Score
+        </button>
+
+        <div className="pointer-events-auto bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl flex overflow-hidden shadow-lg p-0.5">
+          <button onClick={() => setMapType('satellite')} className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg ${mapType === 'satellite' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>Sat</button>
+          <button onClick={() => setMapType('topo')} className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg ${mapType === 'topo' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>Topo</button>
+        </div>
+        
+        <button 
+          onClick={() => setShotOrigin(shotOrigin ? null : userLocation)}
+          className={`pointer-events-auto px-3 h-8 text-[9px] font-black uppercase tracking-widest rounded-xl shadow-lg border transition-all active:scale-95 ${shotOrigin ? 'bg-orange-500 border-orange-400 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]' : 'bg-slate-900/80 border-slate-800/80 text-slate-400'}`}
+        >
+          {shotOrigin ? `Tracker: ${driveDistance}y` : 'Mark Shot'}
+        </button>
+      </div>
+
+      {/* --- LEAFLET WORKSPACE --- */}
       <div className="flex-1 z-0 relative">
         <MapContainer center={mapCenter} zoom={17} zoomControl={false} className="absolute inset-0 h-full w-full">
           <TileLayer url={tileUrl} maxZoom={20} attribution="&copy; Esri" />
           <RecenterMap center={mapCenter} />
           
           {windCone && <Polygon positions={windCone} pathOptions={{ color: 'transparent', fillColor: '#ef4444', fillOpacity: 0.15 }} />}
-          {userLocation && targetPos && <Polyline positions={[userLocation, targetPos, mapCenter]} pathOptions={{ color: '#fbbf24', dashArray: '6, 6', weight: 2 }} />}
-          {shotOrigin && userLocation && <Polyline positions={[shotOrigin, userLocation]} pathOptions={{ color: '#f97316', weight: 3, opacity: 0.8 }} />}
+          {userLocation && targetPos && <Polyline positions={[userLocation, targetPos, mapCenter]} pathOptions={{ color: '#fbbf24', dashArray: '6, 6', weight: 1.5 }} />}
+          {shotOrigin && userLocation && <Polyline positions={[shotOrigin, userLocation]} pathOptions={{ color: '#f97316', weight: 2.5 }} />}
 
-          <CircleMarker center={mapCenter} radius={6} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, weight: 2 }} />
-          {userLocation && <CircleMarker center={userLocation} radius={6} pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 1, weight: 2 }} />}
-          {shotOrigin && <CircleMarker center={shotOrigin} radius={4} pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 1, weight: 2 }} />}
+          <CircleMarker center={mapCenter} radius={5} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, weight: 1.5 }} />
+          {userLocation && <CircleMarker center={userLocation} radius={5} pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 1, weight: 1.5 }} />}
+          {shotOrigin && <CircleMarker center={shotOrigin} radius={3.5} pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 1, weight: 1.5 }} />}
 
           {targetPos && (
             <Marker position={targetPos} draggable={true} icon={targetIcon} eventHandlers={{ drag: (e) => setTargetPos([e.target.getLatLng().lat, e.target.getLatLng().lng]) }}>
-              <Tooltip permanent direction="top" className="!bg-slate-900/90 !backdrop-blur-sm !text-yellow-400 !font-black !text-xs !border-slate-700 !rounded-xl !px-4 !py-2 !whitespace-nowrap !shadow-xl" offset={[0, -15]}>
-                <div className="flex items-center space-x-4 divide-x divide-slate-700/80">
+              <Tooltip permanent direction="top" className="!bg-slate-950/95 !backdrop-blur-md !text-yellow-400 !font-black !text-[10px] !border-slate-800 !rounded-xl !px-3 !py-1.5 !whitespace-nowrap !shadow-2xl" offset={[0, -12]}>
+                <div className="flex items-center space-x-3 font-mono">
                   <div className="flex flex-col items-center">
-                    <span className="text-[9px] text-slate-400 uppercase tracking-widest leading-none mb-1">Hit to Ring</span>
-                    <span className="text-lg leading-none">{distanceToTarget}</span>
+                    <span className="text-[8px] text-slate-500 uppercase font-sans tracking-widest leading-none mb-0.5">To Target</span>
+                    <span className="text-sm leading-none font-bold">{distanceToTarget}</span>
                   </div>
-                  <div className="pl-4 flex flex-col items-center text-emerald-400">
-                    <span className="text-[9px] text-emerald-700 uppercase tracking-widest leading-none mb-1">Ring to Pin</span>
-                    <span className="text-lg leading-none">{targetToPin}</span>
+                  <div className="w-px h-4 bg-slate-800" />
+                  <div className="flex flex-col items-center text-emerald-400">
+                    <span className="text-[8px] text-emerald-700 uppercase font-sans tracking-widest leading-none mb-0.5">To Pin</span>
+                    <span className="text-sm leading-none font-bold">{targetToPin}</span>
                   </div>
                 </div>
               </Tooltip>
@@ -155,25 +149,30 @@ export default function PremiumMapMatrix({ holeData, onLogScoreClick }) {
         </MapContainer>
       </div>
 
-      {/* --- TELEMETRY YARDAGE HUD --- */}
-      <div className="absolute bottom-0 left-0 right-0 z-[400] bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent pt-12 pb-6 px-6">
-        <div className="grid grid-cols-3 divide-x divide-slate-800 text-center items-end relative">
-          <div className="pb-2">
-            <div className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Front</div>
-            <div className="text-2xl font-black text-slate-300">{distanceToFront}</div>
+      {/* --- HUD TELEMETRY TRAIL (FLOATING RADAR FOOTER) --- */}
+      <div className="absolute bottom-20 left-4 right-4 z-[400] pointer-events-none">
+        <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800/80 rounded-2xl p-4 px-6 shadow-[0_-15px_35px_rgba(0,0,0,0.5)] pointer-events-auto grid grid-cols-3 items-center">
+          
+          {/* Front Number Block */}
+          <div className="flex flex-col text-left">
+            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">Front</span>
+            <span className="text-xl font-black text-slate-400 font-mono tracking-tight">{distanceToFront}</span>
           </div>
           
-          <div className="flex flex-col justify-center relative items-center">
-            <div className="text-xs font-black uppercase tracking-widest text-emerald-500 mb-1">To Center</div>
-            <div className="text-5xl font-black text-white tracking-tighter drop-shadow-lg leading-none mb-1">
+          {/* Massive Hero Center Core */}
+          <div className="flex flex-col items-center justify-center relative">
+            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-emerald-400 mb-0.5">Pin Center</span>
+            <span className="text-4xl font-black text-white font-mono tracking-tighter leading-none drop-shadow-[0_0_15px_rgba(255,255,255,0.15)]">
               {distanceToCenter}
-            </div>
+            </span>
           </div>
           
-          <div className="pb-2">
-            <div className="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Back</div>
-            <div className="text-2xl font-black text-slate-300">{distanceToBack}</div>
+          {/* Back Number Block */}
+          <div className="flex flex-col text-right">
+            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">Back</span>
+            <span className="text-xl font-black text-slate-400 font-mono tracking-tight">{distanceToBack}</span>
           </div>
+          
         </div>
       </div>
 
