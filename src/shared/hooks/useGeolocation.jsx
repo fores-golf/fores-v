@@ -3,34 +3,30 @@ import { useState, useEffect } from 'react';
 export function useGeolocation() {
   const [location, setLocation] = useState(null);
   const [error, setError] = useState(null);
+  const [isTracking, setIsTracking] = useState(false);
 
-  useEffect(() => {
-    // 1. Check if the device supports GPS
+  // Manual trigger required by mobile browsers
+  const requestLocation = () => {
     if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser.');
+      setError('Geolocation is not supported by your browser');
       return;
     }
 
-    // 2. Set up the active GPS watcher
-    const watcher = navigator.geolocation.watchPosition(
+    setIsTracking(true);
+    
+    // Watch position gives us real-time updates as the user walks
+    navigator.geolocation.watchPosition(
       (position) => {
-        // PostGIS native format: [Latitude, Longitude] for Leaflet
         setLocation([position.coords.latitude, position.coords.longitude]);
         setError(null);
       },
       (err) => {
         setError(err.message);
+        setIsTracking(false);
       },
-      { 
-        enableHighAccuracy: true, // Forces device to use actual GPS, not just cell towers
-        maximumAge: 0,            // Prevents device from using cached locations
-        timeout: 5000 
-      }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
+  };
 
-    // 3. Clean up the watcher when the user leaves the map tab
-    return () => navigator.geolocation.clearWatch(watcher);
-  }, []);
-
-  return { location, error };
+  return { location, error, isTracking, requestLocation };
 }
