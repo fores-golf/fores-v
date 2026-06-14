@@ -19,7 +19,7 @@ export function useGeolocation() {
       (err) => {
         setError(err.message);
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 17500 }
     );
 
     // Clean up the watcher when the component unmounts
