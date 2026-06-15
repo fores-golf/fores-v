@@ -8,7 +8,7 @@ export default function PlayerIntroCard({
   photoUrl, 
   handicap = "4.2",
   archetype = "Bomber", 
-  homeCourse = "The Legend GC",
+  playerTeam = "Unassigned", // Receives the player's team configuration property string cleanly
   hometown = "Denver, CO",
   parallel = "1/1", 
   serialNumber = 1,
@@ -182,7 +182,7 @@ export default function PlayerIntroCard({
                           loop 
                           muted 
                           playsInline
-                          // CHANGED: object-contain fits full resolution, z-0 keeps it firmly stacked at the back
+                          // object-contain fully fits widescreen frames; z-0 positions canvas correctly at base background level
                           className="w-full h-full object-contain relative z-0 contrast-[1.05] saturate-110"
                         />
                       ) : (
@@ -195,7 +195,7 @@ export default function PlayerIntroCard({
                       </div>
                     )}
                     
-                    {/* CHANGED: Boosted overlay to z-10 so the gloss/shadow effect covers the contain-fitted video sides cleanly */}
+                    {/* z-10 mask seals borders nicely around the non-cropped video frame layers */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-10"></div>
                   </div>
                 </div>
@@ -215,8 +215,8 @@ export default function PlayerIntroCard({
 
                 <div className="grid grid-cols-2 gap-2 border-t border-slate-800 pt-2 text-[10px]">
                   <div>
-                    <span className="text-slate-500 uppercase font-bold text-[7px] block tracking-wider">Home Course</span>
-                    <span className="text-slate-200 font-extrabold truncate block">{homeCourse}</span>
+                    <span className="text-slate-500 uppercase font-bold text-[7px] block tracking-wider">Team</span>
+                    <span className="text-slate-200 font-extrabold truncate block">{playerTeam}</span>
                   </div>
                   <div className="text-right">
                     <span className="text-slate-500 uppercase font-bold text-[7px] block tracking-wider">HCP Index</span>
@@ -323,8 +323,8 @@ export default function PlayerIntroCard({
               </div>
 
               <div className="border-t border-slate-800 pt-2.5 flex items-center justify-between text-[6px] font-bold text-slate-500 uppercase tracking-widest">
-                 <span>© 2026 Fores Tournament Syndicate</span>
-                 <span className="text-slate-400">Card 01/01</span>
+                 <span>© Fores V: Land Of 10,000 Putts</span>
+                 <span className="text-slate-400">01/01</span>
               </div>
             </div>
           </div>

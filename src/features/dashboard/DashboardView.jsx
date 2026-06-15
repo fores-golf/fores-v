@@ -51,6 +51,7 @@ export default function DashboardView({
               captured_metadata: {
                 card_type: 'intro',
                 player_name: player.name,
+		player_team: player.team,
                 parallel: 'Base',
                 serial_number: '#TOUR-CARD',
                 unlocked_timestamp: new Date()

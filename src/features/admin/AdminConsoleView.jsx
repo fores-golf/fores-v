@@ -186,6 +186,7 @@ export default function AdminConsoleView({ isOpen, onBack }) {
                             
                             handicap={usr.handicap || usr.trip_handicap || "0.0"}
                             archetype={usr.archetype || "Golfer"}
+			    playerTeam={usr.team || "Independent"}
                             drivingDist={usr.driving_dist || 250}
                             girPercentage={usr.gir_percentage || 50}
                             avgPutts={usr.avg_putts || 2.0}
