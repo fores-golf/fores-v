@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import PremiumMapMatrix from '../course/PremiumMapMatrix';
 import ScoreEntrySheet from './ScoreEntrySheet';
+import CardMintingProtocol from '../achievements/CardMintingProtocol';
+import { CARD_RULES_ENGINE } from '../achievements/achievementRules';
 import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
 
@@ -12,7 +14,8 @@ export default function MatchScreen({ matchId, onBack }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isScoreSheetOpen, setIsScoreSheetOpen] = useState(false);
   
-  // CHANGED: Now holds the ENTIRE score object (putts, accuracy, etc.) instead of just a number
+  const [mintPayload, setMintPayload] = useState(null);
+  const [isMintingActive, setIsMintingActive] = useState(false);
   const [currentScoreData, setCurrentScoreData] = useState(null);
 
   const [matchInsights, setMatchInsights] = useState({
@@ -50,8 +53,6 @@ export default function MatchScreen({ matchId, onBack }) {
             leafletBack: convertPostGISToLeaflet(data.green_back_geo)
           });
           setPar(data.par || 4);
-        } else {
-          console.warn(`Hole ${currentHole} data row missing in database.`);
         }
       } catch (err) {
         console.error('GPS Data fetch failure:', err.message);
@@ -62,7 +63,6 @@ export default function MatchScreen({ matchId, onBack }) {
     fetchHole();
   }, [currentHole]);
 
-  // FETCH ENTIRE EXISTING SCORE ROW FOR THIS HOLE
   useEffect(() => {
     if (!activeHoleData?.id || !matchId || !player?.id) {
       setCurrentScoreData(null);
@@ -73,7 +73,7 @@ export default function MatchScreen({ matchId, onBack }) {
       try {
         const { data, error } = await supabase
           .from('hole_scores')
-          .select('*') // Select everything to populate the ScoreEntrySheet
+          .select('*')
           .eq('matchup_id', matchId)
           .eq('profile_id', player.id)
           .eq('hole_id', activeHoleData.id)
@@ -146,7 +146,6 @@ export default function MatchScreen({ matchId, onBack }) {
       return; 
     }
 
-    // Instantly update local state so the HUD and sheet retain the new saved data
     setCurrentScoreData({
       gross_score: scoreData.score,
       putts: scoreData.putts,
@@ -156,8 +155,38 @@ export default function MatchScreen({ matchId, onBack }) {
       drinks: scoreData.drinks
     });
 
-    if (currentHole < 18) {
-      setCurrentHole(prev => prev + 1);
+    // --- ASYNCHRONOUS TARGETED CARD PROTOCOL CHECKS ---
+    let matchedCardConfig = null;
+
+    // 1. OceanGate Validation (2+ water balls on single hole)
+    matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
+    
+    // 2. Whammy Validation (+2 double bogey or worse on holes 9 AND 11 in same round)
+    if (!matchedCardConfig) {
+      matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
+    }
+
+    // 3. Banquet Birdie Validation (First gets 1/1, next 4 get /5, next 5 get /10)
+    if (!matchedCardConfig) {
+      matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
+    }
+
+    // --- OVERLAY INTERCEPT DETERMINATOR ---
+    if (matchedCardConfig) {
+      const completePayload = {
+        ...matchedCardConfig,
+        player: player.name || 'Clubhouse Golfer',
+        earnedByUserId: player.id,
+        hole: currentHole,
+        courseName: "Fores V Master Course"
+      };
+
+      setMintPayload(completePayload);
+      setIsMintingActive(true);
+    } else {
+      if (currentHole < 18) {
+        setCurrentHole(prev => prev + 1);
+      }
     }
   };
 
@@ -166,8 +195,6 @@ export default function MatchScreen({ matchId, onBack }) {
     e.stopPropagation();
     if (typeof onBack === 'function') {
       onBack();
-    } else {
-      console.error("The 'onBack' prop was not passed to MatchScreen!");
     }
   };
 
@@ -176,7 +203,6 @@ export default function MatchScreen({ matchId, onBack }) {
       
       {/* HUD HEADER */}
       <header className="absolute top-4 left-4 right-4 bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-2xl flex justify-between items-center px-4 py-2 z-[9999] shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-        
         <div className="flex items-center gap-2">
           <button 
             onClick={handleExitClick}
@@ -199,7 +225,6 @@ export default function MatchScreen({ matchId, onBack }) {
         
         <div className="text-center flex flex-col items-center justify-center select-none">
           <h1 className="text-base font-black tracking-widest text-slate-100 uppercase leading-none">Hole {currentHole}</h1>
-          
           <div className="flex gap-1.5 mt-1 items-center">
             <span className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
               PAR {par}
@@ -235,7 +260,6 @@ export default function MatchScreen({ matchId, onBack }) {
          )}
       </main>
 
-      {/* PASSING THE EXISTING SCORE DATA DOWN TO THE SHEET */}
       <ScoreEntrySheet 
         isOpen={isScoreSheetOpen} 
         onClose={() => setIsScoreSheetOpen(false)} 
@@ -244,6 +268,20 @@ export default function MatchScreen({ matchId, onBack }) {
         onSave={handleScoreSave}
         existingData={currentScoreData} 
       />
+
+      {/* RENDER MINTING FRAMEWORK INTERCEPT OVERLAY MODAL */}
+      {isMintingActive && mintPayload && (
+        <CardMintingProtocol 
+          mintData={mintPayload}
+          onComplete={() => {
+            setIsMintingActive(false);
+            setMintPayload(null);
+            if (currentHole < 18) {
+              setCurrentHole(prev => prev + 1);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

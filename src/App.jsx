@@ -13,14 +13,22 @@ import ChirpsView from './features/chat/ChirpsView';
 import LeaderboardView from './features/leaderboard/LeaderboardView';
 import ScheduleView from './features/schedule/ScheduleView';
 
+// Trading Card Views
+import CardCollectionView from './features/achievements/CardCollectionView';
+// Import the new administrator screen
+import AdminConsoleView from './features/admin/AdminConsoleView';
+
 // --- MAIN ROUTER LOGIC ---
 function AppRouter() {
-  // Consume our new global context!
   const { session, player, isAuthLoading } = useUser();
   const [currentView, setCurrentView] = useState('dashboard'); 
   const [activeScoringMatchId, setActiveScoringMatchId] = useState(null);
 
-  // 1. Show the global boot spinner while checking identity
+  // SECURE CHECK: Determine if the logged-in profile belongs to you (Trevor)
+  // You can verify by your login email or your database row name string
+  const isAdminUser = session?.user?.email === 'tjcolo87@gmail.com' || player?.name?.includes('Trevor');
+
+  // 1. Show global boot spinner while checking identity
   if (isAuthLoading) {
     return (
       <div className="min-h-[100dvh] bg-[#0f172a] flex items-center justify-center pb-safe">
@@ -34,7 +42,7 @@ function AppRouter() {
     return <AuthScreen />;
   }
 
-  // 3. Ensure player row is loaded before rendering the heavy tournament hubs
+  // 3. Ensure player row is loaded before rendering heavy tournament hubs
   if (session && !player) {
     return (
       <div className="min-h-[100dvh] bg-[#0f172a] flex flex-col items-center justify-center pb-safe text-white gap-4">
@@ -54,7 +62,13 @@ function AppRouter() {
           onNavigateToGarage={() => setCurrentView('garage')} 
           onNavigateToChirps={() => setCurrentView('chirps')} 
           onNavigateToLeaderboard={() => setCurrentView('leaderboard')} 
-          onNavigateToSchedule={() => setCurrentView('schedule')} 
+          onNavigateToSchedule={() => setCurrentView('schedule')}
+          onNavigateToVault={() => setCurrentView('vault')}
+          // Pass down the navigation launcher callback for your Admin view
+          onNavigateToAdmin={() => setCurrentView('admin')}
+          // Expose permission state down to the UI
+          isAdmin={isAdminUser}
+          isChirpsOpen={currentView === 'chirps'}
         />
       )}
       
@@ -82,6 +96,18 @@ function AppRouter() {
         />
       )}
 
+      {/* Hidden Trading Card Inventory System View */}
+      <CardCollectionView 
+        isOpen={currentView === 'vault'} 
+        onBack={() => setCurrentView('dashboard')} 
+      />
+
+      {/* SECURE BLOCK: Mount Admin Engine view only if identity authorization clears */}
+      <AdminConsoleView 
+        isOpen={currentView === 'admin' && isAdminUser} 
+        onBack={() => setCurrentView('dashboard')} 
+      />
+
       {/* Hardware Accelerated Persistent Overlay */}
       <GarageView isOpen={currentView === 'garage'} onBack={() => setCurrentView('dashboard')} />
 
@@ -90,7 +116,6 @@ function AppRouter() {
 }
 
 // --- APP WRAPPER ---
-// We wrap the Router in the Provider here so the Router can use the context hooks.
 export default function App() {
   return (
     <UserProvider>
