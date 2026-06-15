@@ -1,74 +1,89 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../config/supabaseClient';
+import { useUser } from '../../../context/UserContext';
 
+// The baseline starter set loaded for brand-new users
 const DEFAULT_BAG = [
-  { id: 'dr', name: 'Driver', distance: 250 },
-  { id: '3w', name: '3W', distance: 230 },
-  { id: '5i', name: '5i', distance: 185 },
-  { id: '6i', name: '6i', distance: 175 },
-  { id: '7i', name: '7i', distance: 165 },
-  { id: '8i', name: '8i', distance: 155 },
-  { id: '9i', name: '9i', distance: 145 },
-  { id: 'pw', name: 'PW', distance: 135 },
-  { id: 'sw', name: 'SW', distance: 115 },
-  { id: 'pt', name: 'Putter', distance: 0 }
+  { id: 'dr', name: 'Driver', type: 'Driver', distance: 265 },
+  { id: '3w', name: '3 Wood', type: 'Wood', distance: 235 },
+  { id: '5i', name: '5i', type: 'Iron', distance: 195 },
+  { id: '6i', name: '6i', type: 'Iron', distance: 180 },
+  { id: '7i', name: '7i', type: 'Iron', distance: 165 },
+  { id: '8i', name: '8i', type: 'Iron', distance: 150 },
+  { id: '9i', name: '9i', type: 'Iron', distance: 135 },
+  { id: 'pw', name: 'Pitching Wedge', type: 'Wedge', distance: 120 },
+  { id: 'sw', name: 'Sand Wedge', type: 'Wedge', distance: 105 },
+  { id: 'pt', name: 'Putter', type: 'Putter', distance: 0 }
 ];
 
 export function useGarageData() {
+  const { player } = useUser();
+  // Initialize state with the starter set
+  const [bag, setBag] = useState(DEFAULT_BAG);
+  const [hometown, setHometown] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [hometown, setHometown] = useState('');
-  const [bag, setBag] = useState(DEFAULT_BAG);
+  const [recordExists, setRecordExists] = useState(false);
 
   useEffect(() => {
-    async function loadGarageData() {
+    async function fetchGarage() {
+      if (!player?.id) return;
+      
       try {
         setLoading(true);
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        // Fetch user's garage data
         const { data, error } = await supabase
           .from('garages')
-          .select('bag_json, hometown')
-          .eq('profile_id', user.id)
+          .select('*')
+          .eq('profile_id', player.id)
           .single();
 
+        // PGRST116 means no row found. We safely ignore it and let them keep the DEFAULT_BAG.
         if (error && error.code !== 'PGRST116') throw error;
 
         if (data) {
-          if (data.bag_json) setBag(data.bag_json);
+          setRecordExists(true);
           if (data.hometown) setHometown(data.hometown);
+          
+          // If they have a valid custom bag saved, overwrite the default bag
+          if (data.bag_json && Array.isArray(data.bag_json)) {
+            setBag(data.bag_json);
+          } else if (data.bag_json && !Array.isArray(data.bag_json)) {
+            // Safety catch: If they had the old legacy object format from earlier, reset to default starter set
+            setBag(DEFAULT_BAG);
+          }
         }
       } catch (err) {
-        console.error('Error opening garage doors:', err.message);
+        console.error('Error fetching garage:', err.message);
       } finally {
         setLoading(false);
       }
     }
-    loadGarageData();
-  }, []);
 
-  const saveGarage = async (updatedBag, updatedHometown) => {
+    fetchGarage();
+  }, [player]);
+
+  const saveGarage = async (currentBag, currentHometown) => {
+    if (!player?.id) return;
+    setSaving(true);
+    
     try {
-      setSaving(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const payload = {
+        profile_id: player.id,
+        bag_json: currentBag,
+        hometown: currentHometown,
+        updated_at: new Date()
+      };
 
-      const { error } = await supabase.from('garages').upsert({
-        profile_id: user.id,
-        bag_json: updatedBag,
-        hometown: updatedHometown,
-        updated_at: new Date().toISOString()
-      });
-
-      if (error) throw error;
-      setBag(updatedBag);
-      setHometown(updatedHometown);
-      return { success: true };
+      if (recordExists) {
+        const { error } = await supabase.from('garages').update(payload).eq('profile_id', player.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('garages').insert([payload]);
+        if (error) throw error;
+        setRecordExists(true);
+      }
     } catch (err) {
-      console.error('Error locking garage:', err.message);
-      return { success: false, error: err.message };
+      console.error('Error saving garage:', err.message);
     } finally {
       setSaving(false);
     }

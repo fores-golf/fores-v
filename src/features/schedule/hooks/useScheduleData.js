@@ -1,117 +1,70 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../config/supabaseClient';
+import { useUser } from '../../../context/UserContext';
 
 export function useScheduleData() {
-  const [schedule, setSchedule] = useState({ live: [], upcoming: [], completed: [] });
-  const [golfers, setGolfers] = useState([]); // Populated directly from the 'players' table
+  const { player } = useUser();
+  const [allMatches, setAllMatches] = useState([]);
+  const [myMatches, setMyMatches] = useState([]);
+  const [golfers, setGolfers] = useState([]); // Will now load the full 16-player list seamlessly
   const [loading, setLoading] = useState(true);
 
-  const fetchTournamentItinerary = async () => {
+  const fetchMatches = async () => {
     try {
       setLoading(true);
-      
-      // 1. Fetch real-time tournament roster from the explicit players table
-      const { data: playersData, error: playersError } = await supabase
-        .from('players')
-        .select('name, team');
-      
-      if (playersError) throw playersError;
-      if (playersData) setGolfers(playersData);
 
-      // 2. Fetch all tournament matches
-      const { data: matchesData, error: matchesError } = await supabase
+      // 1. Pointed directly to the unconstrained master list
+      const { data: rosterData, error: rosterError } = await supabase
+        .from('players')
+        .select('id, name, team')
+        .order('name', { ascending: true });
+      
+      if (rosterError) throw rosterError;
+      setGolfers(rosterData || []);
+
+      // 2. Fetch tournament schedule layout
+      const { data: scheduleData, error: scheduleError } = await supabase
         .from('matches')
         .select('*')
-        .order('created_at', { ascending: true });
+        .order('round', { ascending: true })
+        .order('match_number', { ascending: true });
 
-      if (matchesError) throw matchesError;
+      if (scheduleError) throw scheduleError;
+      setAllMatches(scheduleData || []);
 
-      if (matchesData) {
-        const live = [];
-        const upcoming = [];
-        const completed = [];
-
-        matchesData.forEach(match => {
-          const structuredMatch = {
-            ...match,
-            tee_time: match.format_rules?.tee_time || "10:00 AM",
-            current_hole: match.format_rules?.current_hole || 1,
-            course_name: match.format_rules?.course_name || "The Legend"
-          };
-
-          if (match.status === 'live') {
-            live.push(structuredMatch);
-          } else if (match.status === 'completed') {
-            completed.push(structuredMatch);
-          } else {
-            upcoming.push(structuredMatch);
-          }
-        });
-
-        // Presentation sorts (Live by holes completed descending, upcoming chronologically)
-        live.sort((a, b) => b.current_hole - a.current_hole);
-        upcoming.sort((a, b) => a.tee_time.localeCompare(b.tee_time));
-
-        setSchedule({ live, upcoming, completed });
+      // 3. Keep "My Matches" filtering smoothly
+      if (player?.name) {
+        const golferName = player.name;
+        const filteredMyMatches = (scheduleData || []).filter(match => 
+          match.team1_player1 === golferName ||
+          match.team1_player2 === golferName ||
+          match.team2_player1 === golferName ||
+          match.team2_player2 === golferName
+        );
+        setMyMatches(filteredMyMatches);
       }
+
     } catch (err) {
-      console.error('Failed to load tournament itinerary out of DB:', err.message);
+      console.error('Error fetching tournament schedule:', err.message);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchTournamentItinerary();
-  }, []);
+    fetchMatches();
+    
+    const matchSubscription = supabase
+      .channel('live-matches')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
+        fetchMatches();
+      })
+      .subscribe();
 
-  const createNewMatch = async (matchPayload) => {
-    try {
-      // Direct foreign key matching logic to map strings to your holes table architecture
-      const derivedCourseId = matchPayload.courseName === 'The Legend' ? 1 : 2;
+    return () => {
+      supabase.removeChannel(matchSubscription);
+    };
+  }, [player?.name]);
 
-      const { error } = await supabase.from('matches').insert({
-        round: parseInt(matchPayload.round),
-        format: matchPayload.format,
-        status: 'upcoming',
-        team1_player1: matchPayload.t1p1,
-        team1_player2: matchPayload.t1p2 || null,
-        team2_player1: matchPayload.t2p1,
-        team2_player2: matchPayload.t2p2 || null,
-        course_id: derivedCourseId, 
-        format_rules: {
-          tee_time: matchPayload.teeTime,
-          course_name: matchPayload.courseName,
-          current_hole: 1
-        }
-      });
-
-      if (error) throw error;
-      
-      // Refresh state from server to immediately reflect the new row addition
-      await fetchTournamentItinerary();
-      return { success: true };
-    } catch (err) {
-      console.error('Error inserting match pairing matrix row:', err.message);
-      return { success: false, error: err.message };
-    }
-  };
-
-  const startMatchLive = async (matchId) => {
-    try {
-      const { error } = await supabase
-        .from('matches')
-        .update({ status: 'live' })
-        .eq('id', matchId);
-
-      if (error) throw error;
-      await fetchTournamentItinerary();
-      return { success: true };
-    } catch (err) {
-      console.error('Error initiating live match configuration:', err.message);
-      return { success: false, error: err.message };
-    }
-  };
-
-  return { schedule, golfers, loading, createNewMatch, startMatchLive };
+  return { allMatches, myMatches, golfers, loading, refreshMatches: fetchMatches };
 }

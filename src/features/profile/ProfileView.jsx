@@ -1,170 +1,278 @@
-import React, { useState, useEffect } from 'react';
-import { useProfileData } from './hooks/useProfileData';
+import React, { useState, useRef } from 'react';
 import { supabase } from '../../config/supabaseClient';
+import { useUser } from '../../context/UserContext';
 
 export default function ProfileView({ onBack }) {
-  const { profile, teams, loading, updating, updateProfile, uploadAvatar } = useProfileData();
-  const [username, setUsername] = useState('');
-  const [handicap, setHandicap] = useState(0);
-  const [teamName, setTeamName] = useState('');
+  const { player, logout, refreshIdentity } = useUser();
+  
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  
+  // Local form state
+  const [formData, setFormData] = useState({
+    name: player?.name || '',
+    archetype: player?.archetype || 'All-Around',
+    driving_dist: player?.driving_dist || '',
+    gir_percentage: player?.gir_percentage || '',
+    avg_putts: player?.avg_putts || '',
+    power_rating: player?.power_rating || '',
+    short_game_rating: player?.short_game_rating || ''
+  });
 
-  useEffect(() => {
-    if (profile) {
-      setUsername(profile.username);
-      setHandicap(profile.handicap);
-      setTeamName(profile.team_name);
-    }
-  }, [profile]);
+  const fileInputRef = useRef(null);
 
-  const handleSave = async (e) => {
-    if (e) e.preventDefault();
-    const result = await updateProfile({ username, handicap, avatar_url: profile.avatar_url, team_name: teamName });
-    if (result?.success) {
-      alert('Golfer matrix updated successfully!');
+  if (!player) return null;
+
+  const isClams = player.team === 'Slanted Clams';
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // --- IMAGE UPLOAD ENGINE ---
+  const handleImageUpload = async (e) => {
+    try {
+      if (!e.target.files || e.target.files.length === 0) return;
+      setIsUploading(true);
+      
+      const file = e.target.files[0];
+      // Create a unique file name using their ID
+      const fileExt = file.name.split('.').pop();
+      // Added a timestamp to the filename to force the browser to bust the image cache
+      const filePath = `${player.id}/avatar_${Date.now()}.${fileExt}`;
+
+      // 1. Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      // 2. Get the public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      // 3. Save the URL to their profile table
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', player.id);
+
+      if (updateError) throw updateError;
+
+      // 4. Force global app refresh to show new picture
+      await refreshIdentity();
+      
+    } catch (error) {
+      alert('Error uploading image: ' + error.message);
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-[100dvh] bg-[#0f172a] flex items-center justify-center pb-safe">
-        <span className="animate-spin h-10 w-10 border-4 border-[#34d399] border-t-transparent rounded-full" />
-      </div>
-    );
-  }
+  // --- TEXT DATA SAVE ENGINE ---
+  const handleSaveProfile = async () => {
+    setIsSaving(true);
+    try {
+      const payload = {
+        name: formData.name,
+        archetype: formData.archetype,
+        driving_dist: parseInt(formData.driving_dist) || null,
+        gir_percentage: parseInt(formData.gir_percentage) || null,
+        avg_putts: parseFloat(formData.avg_putts) || null,
+        power_rating: parseInt(formData.power_rating) || null,
+        short_game_rating: parseInt(formData.short_game_rating) || null
+      };
 
-  // Dynamic perimeter styling based on selected team franchise
-  const getTeamGlowColor = () => {
-    if (teamName === 'Slanted Clams') return 'shadow-[0_0_25px_rgba(59,130,246,0.25)] border-blue-500/40';
-    if (teamName === 'Clam Brothelmen') return 'shadow-[0_0_25px_rgba(239,68,68,0.25)] border-red-500/40';
-    return 'shadow-[0_0_20px_rgba(52,211,153,0.1)] border-white/10';
+      const { error } = await supabase
+        .from('profiles')
+        .update(payload)
+        .eq('id', player.id);
+
+      if (error) throw error;
+      
+      await refreshIdentity();
+      setIsEditing(false);
+    } catch (error) {
+      alert('Error saving profile: ' + error.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#0f172a] text-white font-sans pb-safe">
+    <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
       
-      {/* Top Bar Nav */}
-      <div className="px-5 py-4 flex justify-between items-center bg-[#0f172a]/80 backdrop-blur-xl sticky top-0 z-50 border-b border-white/5">
-        <button onClick={onBack} className="text-sm font-bold text-slate-400 flex items-center gap-1 active:scale-95 transition-transform">
+      {/* Top App Bar */}
+      <div className="px-5 py-4 flex justify-between items-center bg-[#0f172a]/90 backdrop-blur-xl border-b border-white/5 sticky top-0 z-20">
+        <button onClick={onBack} className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 active:scale-95 transition-transform">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"></path></svg>
           Hub
         </button>
-        <h1 className="font-black text-lg tracking-tight uppercase">Golfer Card</h1>
-        <button onClick={handleSave} disabled={updating} className="text-sm font-black text-[#34d399] active:scale-95 transition-transform disabled:opacity-50">
-          Save
-        </button>
+        <h1 className="font-black text-lg tracking-tight uppercase italic flex items-center gap-1.5">
+          Tour Card
+        </h1>
+        {isEditing ? (
+          <button onClick={handleSaveProfile} disabled={isSaving} className="text-xs font-black text-[#34d399] uppercase tracking-wider active:scale-95 transition-transform">
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        ) : (
+          <button onClick={() => setIsEditing(true)} className="text-xs font-black text-amber-500 uppercase tracking-wider active:scale-95 transition-transform flex items-center gap-1">
+            Edit
+          </button>
+        )}
       </div>
 
-      <main className="p-5 flex flex-col gap-6 max-w-md mx-auto">
+      <main className="p-5 flex flex-col gap-6 max-w-md mx-auto relative z-0">
         
-        {/* --- VISUAL PLAYER IDENTITY CARD --- */}
-        <div className={`relative overflow-hidden rounded-3xl border p-6 bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#020617] text-center transition-all duration-300 ${getTeamGlowColor()}`}>
+        {/* HERO JUMBOTRON */}
+        <div className={`bg-gradient-to-br ${isClams ? 'from-blue-900/40 to-[#0f172a]' : 'from-red-900/40 to-[#0f172a]'} rounded-3xl p-6 border ${isClams ? 'border-blue-500/20' : 'border-red-500/20'} shadow-2xl relative overflow-hidden`}>
           
-          {/* Team Background Gradient Flares */}
-          {teamName === 'Slanted Clams' && <div className="absolute -right-10 -top-10 w-36 h-36 bg-blue-500/15 rounded-full blur-3xl"></div>}
-          {teamName === 'Clam Brothelmen' && <div className="absolute -right-10 -top-10 w-36 h-36 bg-red-500/15 rounded-full blur-3xl"></div>}
-          {(!teamName) && <div className="absolute -right-10 -top-10 w-36 h-36 bg-[#34d399]/10 rounded-full blur-3xl"></div>}
-
-          {/* Avatar Upload Container */}
-          <div className="relative w-24 h-24 mx-auto mb-4 group/avatar">
-            <label htmlFor="avatar-upload" className="cursor-pointer block relative h-full w-full rounded-full overflow-hidden border-2 border-white/10 bg-slate-800 shadow-inner">
-              {profile.avatar_url ? (
-                <img src={profile.avatar_url} alt="Profile Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-2xl font-black bg-gradient-to-br from-slate-700 to-slate-900 text-slate-300">
-                  {username ? username.substring(0, 2).toUpperCase() : '??'}
+          <div className="flex flex-col items-center mb-6 relative z-10 text-center">
+            
+            {/* --- AVATAR UPLOAD SECTOR (Now un-restricted!) --- */}
+            <div 
+              className="relative mb-4 group cursor-pointer" 
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className={`w-24 h-24 rounded-full border-4 ${isClams ? 'border-blue-500/50' : 'border-red-500/50'} overflow-hidden bg-black/50 flex items-center justify-center relative shadow-xl`}>
+                {isUploading ? (
+                  <span className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
+                ) : player.avatar_url ? (
+                  <img src={player.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-3xl font-black text-slate-600">{player.name.charAt(0)}</span>
+                )}
+                
+                {/* Edit overlay (Now always active on hover/tap) */}
+                <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                 </div>
-              )}
-              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex flex-col items-center justify-center text-[10px] font-black tracking-wider uppercase text-white">
-                <svg className="w-5 h-5 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path></svg>
-                Edit
               </div>
-            </label>
-            <input type="file" id="avatar-upload" accept="image/*" onChange={uploadAvatar} disabled={updating} className="hidden" />
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleImageUpload} 
+                accept="image/*" 
+                className="hidden" 
+              />
+            </div>
+
+            {/* --- NAME & ARCHETYPE --- */}
+            {isEditing ? (
+              <div className="flex flex-col gap-2 w-full px-4">
+                <input 
+                  type="text" 
+                  value={formData.name} 
+                  onChange={(e) => handleInputChange('name', e.target.value)}
+                  className="bg-black/50 border border-white/10 rounded-xl p-2 text-center text-xl font-black text-white focus:outline-none focus:border-white/30"
+                />
+                <input 
+                  type="text" 
+                  value={formData.archetype} 
+                  onChange={(e) => handleInputChange('archetype', e.target.value)}
+                  className="bg-black/50 border border-white/10 rounded-xl p-2 text-center text-xs font-bold text-slate-300 focus:outline-none focus:border-white/30 uppercase tracking-widest"
+                />
+              </div>
+            ) : (
+              <>
+                <h2 className="text-3xl font-black tracking-tighter uppercase italic drop-shadow-md">{player.name}</h2>
+                <div className="flex justify-center items-center gap-2 mt-1">
+                  <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-full ${isClams ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
+                    {player.team}
+                  </span>
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-black/30 px-2 py-0.5 rounded-full border border-white/5">
+                    {player.archetype || 'All-Around'}
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
-          <h2 className="text-xl font-black tracking-tight text-white">{username || 'Anonymous Golfer'}</h2>
-          <div className="flex items-center justify-center gap-2 mt-1">
-            <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
-              teamName === 'Slanted Clams' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-              teamName === 'Clam Brothelmen' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-              'bg-slate-500/10 text-slate-400 border-slate-500/20'
-            }`}>
-              {teamName || 'Unassigned'}
-            </span>
-            <span className="text-xs font-bold text-slate-400">•</span>
-            <span className="text-xs font-bold tracking-tight text-slate-400">HDCP: <span className="text-[#34d399]">{handicap || '0.0'}</span></span>
+          {/* STATIC INDEX METRIC */}
+          <div className="flex justify-center border-t border-white/5 pt-4 mt-2">
+            <div className="text-center">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 block mb-1">Index</span>
+              <span className={`text-4xl font-black tabular-nums tracking-tighter ${isClams ? 'text-blue-400' : 'text-red-400'}`}>{player.handicap}</span>
+            </div>
           </div>
         </div>
 
-        {/* --- DATA INPUT FORM --- */}
-        <form onSubmit={handleSave} className="flex flex-col gap-4">
-          
-          {/* Team Switcher Segment block */}
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Team Franchise</label>
-            <div className="grid grid-cols-2 gap-2 bg-white/5 p-1 rounded-2xl border border-white/5 backdrop-blur-md">
-              {teams.map((t) => {
-                const isSelected = teamName === t.name;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setTeamName(t.name)}
-                    className={`py-3 rounded-xl font-bold text-sm transition-all ${
-                      isSelected 
-                        ? t.name === 'Slanted Clams' 
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
-                          : 'bg-red-600 text-white shadow-lg shadow-red-600/20'
-                        : 'text-slate-400 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    {t.name}
-                  </button>
-                );
-              })}
-            </div>
+        {/* SCOUTING COMBINE METRICS */}
+        <section className="space-y-3">
+          <div className="flex justify-between items-center px-1">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Scouting Combine Metrics</h3>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Golfer Handle</label>
-            <div className="relative">
-              <input 
-                type="text" 
-                value={username} 
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter handle..."
-                className="w-full bg-white/5 backdrop-blur-md rounded-2xl border border-white/5 p-4 pl-11 text-white font-semibold placeholder-slate-600 focus:outline-none focus:border-[#34d399]/40 focus:ring-1 focus:ring-[#34d399]/40 transition-colors"
-              />
-              <svg className="absolute left-4 top-4.5 w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+          <div className="bg-white/5 border border-white/5 rounded-2xl shadow-md backdrop-blur-md overflow-hidden">
+            
+            {/* Driving Dist */}
+            <div className="flex justify-between items-center p-4 border-b border-white/5">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Avg Driving Dist</span>
+              {isEditing ? (
+                <div className="flex items-center gap-2 bg-black/30 rounded-lg px-2 py-1 border border-white/10 w-24">
+                  <input type="number" value={formData.driving_dist} onChange={(e) => handleInputChange('driving_dist', e.target.value)} className="w-full bg-transparent border-none text-right font-black text-white focus:outline-none text-sm tabular-nums" />
+                  <span className="text-[10px] font-bold text-slate-500">YDS</span>
+                </div>
+              ) : (
+                <span className="text-sm font-black tabular-nums text-white">{player.driving_dist ? `${player.driving_dist} YDS` : '--'}</span>
+              )}
             </div>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Handicap Index</label>
-            <div className="relative">
-              <input 
-                type="number" 
-                step="0.1"
-                value={handicap} 
-                onChange={(e) => setHandicap(e.target.value)}
-                placeholder="0.0"
-                className="w-full bg-white/5 backdrop-blur-md rounded-2xl border border-white/5 p-4 pl-11 text-white font-semibold placeholder-slate-600 focus:outline-none focus:border-[#34d399]/40 focus:ring-1 focus:ring-[#34d399]/40 transition-colors"
-              />
-              <svg className="absolute left-4 top-4.5 w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+            
+            {/* GIR % */}
+            <div className="flex justify-between items-center p-4 border-b border-white/5">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">GIR %</span>
+              {isEditing ? (
+                <div className="flex items-center gap-2 bg-black/30 rounded-lg px-2 py-1 border border-white/10 w-24">
+                  <input type="number" value={formData.gir_percentage} onChange={(e) => handleInputChange('gir_percentage', e.target.value)} className="w-full bg-transparent border-none text-right font-black text-white focus:outline-none text-sm tabular-nums" />
+                  <span className="text-[10px] font-bold text-slate-500">%</span>
+                </div>
+              ) : (
+                <span className="text-sm font-black tabular-nums text-white">{player.gir_percentage ? `${player.gir_percentage}%` : '--'}</span>
+              )}
             </div>
-          </div>
+            
+            {/* Avg Putts */}
+            <div className="flex justify-between items-center p-4 border-b border-white/5">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Avg Putts / Hole</span>
+              {isEditing ? (
+                <input type="number" step="0.1" value={formData.avg_putts} onChange={(e) => handleInputChange('avg_putts', e.target.value)} className="bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-right font-black text-white focus:outline-none text-sm tabular-nums w-20" />
+              ) : (
+                <span className="text-sm font-black tabular-nums text-white">{player.avg_putts || '--'}</span>
+              )}
+            </div>
 
-          <div className="mt-6 pt-4 border-t border-white/5">
-            <button 
-              type="button"
-              onClick={() => supabase.auth.signOut()}
-              className="w-full bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 font-bold py-4 rounded-2xl transition-colors active:scale-95 duration-200 flex justify-center items-center gap-2 text-sm uppercase tracking-wider"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
-              Sign Out Session
-            </button>
+            {/* Power Rating */}
+            <div className="flex justify-between items-center p-4 border-b border-white/5">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Power Rating (0-99)</span>
+              {isEditing ? (
+                <input type="number" value={formData.power_rating} onChange={(e) => handleInputChange('power_rating', e.target.value)} className="bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-right font-black text-white focus:outline-none text-sm tabular-nums w-20" />
+              ) : (
+                <span className="text-sm font-black tabular-nums text-amber-400">{player.power_rating || '--'}</span>
+              )}
+            </div>
+
+            {/* Short Game Rating */}
+            <div className="flex justify-between items-center p-4">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Short Game (0-99)</span>
+              {isEditing ? (
+                <input type="number" value={formData.short_game_rating} onChange={(e) => handleInputChange('short_game_rating', e.target.value)} className="bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-right font-black text-white focus:outline-none text-sm tabular-nums w-20" />
+              ) : (
+                <span className="text-sm font-black tabular-nums text-amber-400">{player.short_game_rating || '--'}</span>
+              )}
+            </div>
+
           </div>
-        </form>
+        </section>
+
+        {/* LOGOUT BUTTON */}
+        {!isEditing && (
+          <button onClick={logout} className="w-full mt-4 py-4 border border-red-500/20 bg-red-500/5 rounded-2xl text-xs font-black uppercase tracking-wider text-red-400 hover:bg-red-500/10 transition-colors active:scale-[0.99]">
+            Sign Out of Tour
+          </button>
+        )}
 
       </main>
     </div>
