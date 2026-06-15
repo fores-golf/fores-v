@@ -247,11 +247,23 @@ export default function GarageView({ isOpen, onBack }) {
                     {club.name !== 'Putter' ? (
                       <div className="flex items-center gap-3 bg-black/30 rounded-xl px-3 py-1.5 border border-white/5 focus-within:border-[#34d399]/40 transition-colors w-28">
                         <input 
-                          type="number"
-                          value={club.distance}
-                          onChange={(e) => handleUpdateField(club.id, 'distance', e.target.value)}
-                          className="w-full bg-transparent border-none text-right font-black text-white focus:outline-none text-lg tabular-nums"
-                        />
+  type="number"
+  // FIX 1: If the distance is 0, show an empty string so the input box is completely clean
+  value={club.distance === 0 ? '' : club.distance}
+  
+  onChange={(e) => {
+    const rawValue = e.target.value;
+    
+    // FIX 2: Strip out any leading zeros if they type something like "0250"
+    // This turns "0250" into a clean integer 250 instantly
+    const parsedValue = rawValue === '' ? 0 : parseInt(rawValue, 10);
+    
+    handleUpdateField(club.id, 'distance', parsedValue);
+  }}
+  // Use your placeholder to show a clean baseline hint instead of a sticky 0
+  placeholder="0"
+  className="w-full bg-transparent border-none text-right font-black text-white focus:outline-none text-lg tabular-nums"
+/>
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Yds</span>
                       </div>
                     ) : (

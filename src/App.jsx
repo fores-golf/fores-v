@@ -75,7 +75,7 @@ function AppRouter() {
       {currentView === 'match' && (
         <MatchScreen 
           matchId={activeScoringMatchId}
-          onExit={() => {
+          onBack={() => {
             setActiveScoringMatchId(null);
             setCurrentView('schedule');
           }} 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-export default function ScoreEntrySheet({ isOpen, onClose, currentHole, par, onSave }) {
+export default function ScoreEntrySheet({ isOpen, onClose, currentHole, par, onSave, existingData }) {
   const [score, setScore] = useState(par);
   const [putts, setPutts] = useState(2);
   const [accuracy, setAccuracy] = useState('hit'); // 'hit', 'left', 'right', 'long', 'short'
@@ -8,14 +8,28 @@ export default function ScoreEntrySheet({ isOpen, onClose, currentHole, par, onS
   const [water, setWater] = useState(0);
   const [drinks, setDrinks] = useState(0);
 
+  // Add this inside ScoreEntrySheet, right below your useState declarations:
   useEffect(() => {
-    setScore(par);
-    setPutts(2);
-    setAccuracy('hit');
-    setPenalties(0);
-    setWater(0);
-    setDrinks(0);
-  }, [currentHole, par]);
+    if (isOpen) {
+      if (existingData) {
+        // If data exists, pre-fill all form fields with their saved values
+        setScore(existingData.gross_score);
+        setPutts(existingData.putts || 0);
+        setAccuracy(existingData.accuracy || ''); 
+        setPenalties(existingData.penalty_strokes || 0);
+        setWater(existingData.water_balls || 0);
+        setDrinks(existingData.drinks || 0);
+      } else {
+        // If no data exists, wipe the sheet clean for a fresh hole
+        setScore(par);
+        setPutts(2); // standard par assumption
+        setAccuracy('');
+        setPenalties(0);
+        setWater(0);
+        setDrinks(0);
+      }
+    }
+  }, [isOpen, existingData, par]);
 
   if (!isOpen) return null;
 

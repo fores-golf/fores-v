@@ -17,38 +17,39 @@ const DEFAULT_BAG = [
 ];
 
 export function useGarageData() {
-  const { player } = useUser();
-  // Initialize state with the starter set
+  // 1. Grab both player AND session to guarantee we have the master database ID
+  const { player, session } = useUser();
+  
+  // 2. Safely extract the definitive Auth UUID
+  const activeUserId = session?.user?.id || player?.id;
+
   const [bag, setBag] = useState(DEFAULT_BAG);
   const [hometown, setHometown] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [recordExists, setRecordExists] = useState(false);
 
+  // --- FETCH EXISTING BAG ON LOAD ---
   useEffect(() => {
     async function fetchGarage() {
-      if (!player?.id) return;
+      // Don't run until we have the definitive ID
+      if (!activeUserId) return;
       
       try {
         setLoading(true);
         const { data, error } = await supabase
           .from('garages')
           .select('*')
-          .eq('profile_id', player.id)
-          .single();
+          .eq('profile_id', activeUserId) // Using the safe ID here
+          .maybeSingle();
 
-        // PGRST116 means no row found. We safely ignore it and let them keep the DEFAULT_BAG.
-        if (error && error.code !== 'PGRST116') throw error;
+        if (error) throw error;
 
         if (data) {
-          setRecordExists(true);
           if (data.hometown) setHometown(data.hometown);
           
-          // If they have a valid custom bag saved, overwrite the default bag
-          if (data.bag_json && Array.isArray(data.bag_json)) {
+          if (data.bag_json && Array.isArray(data.bag_json) && data.bag_json.length > 0) {
             setBag(data.bag_json);
           } else if (data.bag_json && !Array.isArray(data.bag_json)) {
-            // Safety catch: If they had the old legacy object format from earlier, reset to default starter set
             setBag(DEFAULT_BAG);
           }
         }
@@ -60,30 +61,35 @@ export function useGarageData() {
     }
 
     fetchGarage();
-  }, [player]);
+  }, [activeUserId]);
 
+  // --- SAVE CUSTOM BAG TO DATABASE ---
   const saveGarage = async (currentBag, currentHometown) => {
-    if (!player?.id) return;
+    // Failsafe block
+    if (!activeUserId) {
+      console.error("Missing activeUserId, cannot save.");
+      return;
+    }
+
     setSaving(true);
     
     try {
       const payload = {
-        profile_id: player.id,
+        profile_id: activeUserId, // The database will 100% accept this ID
         bag_json: currentBag,
         hometown: currentHometown,
         updated_at: new Date()
       };
 
-      if (recordExists) {
-        const { error } = await supabase.from('garages').update(payload).eq('profile_id', player.id);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('garages').insert([payload]);
-        if (error) throw error;
-        setRecordExists(true);
-      }
+      const { error } = await supabase
+        .from('garages')
+        .upsert(payload, { onConflict: 'profile_id' });
+
+      if (error) throw error;
+
     } catch (err) {
       console.error('Error saving garage:', err.message);
+      alert('Failed to save garage data: ' + err.message);
     } finally {
       setSaving(false);
     }

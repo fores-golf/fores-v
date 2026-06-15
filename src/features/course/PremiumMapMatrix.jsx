@@ -6,6 +6,35 @@ import { useGeolocation } from '../../shared/hooks/useGeolocation';
 import { useWeather } from '../../shared/hooks/useWeather';
 import { calculateDistanceYards } from '../../shared/utils/geoMath';
 
+// --- VIRTUAL CADDIE ENGINE ---
+// Physics: Ball travels ~2% further per 1,000 ft of elevation gain.
+function getCaddieAdvice(rawYardage, courseElevFt, homeElevFt, garage) {
+  if (!rawYardage || rawYardage === '---') return { playsLike: '---', club: '--' };
+
+  // Calculate altitude density difference
+  const elevationDiff = courseElevFt - homeElevFt;
+  
+  // If course is higher than home, ball flies further -> plays shorter
+  const flightAdjustment = (elevationDiff / 1000) * 0.02;
+  const playsLike = Math.round(rawYardage * (1 - flightAdjustment));
+
+  let recommendedClub = '--';
+  let closestDiff = Infinity;
+
+  // Scan the garage array to find the club that matches the "Plays Like" distance
+  if (garage && garage.length > 0) {
+    garage.forEach(item => {
+      const diff = Math.abs(item.distance - playsLike);
+      if (diff < closestDiff) {
+        closestDiff = diff;
+        recommendedClub = item.club_name; 
+      }
+    });
+  }
+
+  return { playsLike, club: recommendedClub };
+}
+
 function RecenterMap({ center }) {
   const map = useMap();
   useEffect(() => {
@@ -28,8 +57,8 @@ function getDestinationPoint(lat, lng, distanceYds, bearingDeg) {
 const targetIcon = new L.divIcon({
   className: 'custom-target-icon',
   html: `<div class="w-8 h-8 border-[3px] border-yellow-400 rounded-full flex items-center justify-center bg-yellow-400/20 backdrop-blur-sm shadow-[0_0_15px_rgba(250,204,21,0.5)] cursor-move">
-           <div class="w-1.5 h-1.5 bg-yellow-400 rounded-full"></div>
-         </div>`,
+            <div class="w-1.5 h-1.5 bg-yellow-400 rounded-full"></div>
+          </div>`,
   iconSize: [32, 32],
   iconAnchor: [16, 16],
 });
@@ -40,31 +69,41 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const [shotOrigin, setShotOrigin] = useState(null);
   
   const { location: userLocation, isTracking, requestLocation } = useGeolocation();
-  const mapCenter = holeData.leafletCenter; 
-  const weather = useWeather(mapCenter[0], mapCenter[1]);
+  const mapCenter = holeData?.leafletCenter; 
+  const weather = useWeather(mapCenter?.[0], mapCenter?.[1]);
 
-  // Recalculate / drop the target ring cleanly every time the hole changes
   useEffect(() => {
     if (userLocation && mapCenter) {
       setTargetPos([(userLocation[0] + mapCenter[0]) / 2, (userLocation[1] + mapCenter[1]) / 2]);
     } else if (mapCenter) {
-      // Fallback if no user GPS: drop target 30 yards short of pin
       setTargetPos([mapCenter[0] - 0.0002, mapCenter[1] - 0.0002]);
     }
-  }, [holeData, userLocation]); // Listens explicitly to hole changes!
+  }, [holeData, userLocation, mapCenter]); 
 
-  // --- SAFE YARDAGE CALCULATION ---
-  // If the calculated yardage is impossibly huge (e.g. over 20,000 yards), 
-  // it means the device hasn't locked true GPS coordinates yet. Render '---' instead.
-  const formatYardage = (val) => (val && val < 20000) ? val : '---';
+  // --- SAFE YARDAGE CALCULATION (20,000 limit removed) ---
+  const formatYardage = (val) => (val) ? val : '---';
 
   const distanceToCenter = userLocation && mapCenter ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], mapCenter[0], mapCenter[1])) : '---';
-  const distanceToFront = userLocation && holeData.leafletFront ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], holeData.leafletFront[0], holeData.leafletFront[1])) : '---';
-  const distanceToBack = userLocation && holeData.leafletBack ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], holeData.leafletBack[0], holeData.leafletBack[1])) : '---';
+  const distanceToFront = userLocation && holeData?.leafletFront ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], holeData.leafletFront[0], holeData.leafletFront[1])) : '---';
+  const distanceToBack = userLocation && holeData?.leafletBack ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], holeData.leafletBack[0], holeData.leafletBack[1])) : '---';
   
   const distanceToTarget = userLocation && targetPos ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], targetPos[0], targetPos[1])) : '---';
   const targetToPin = targetPos && mapCenter ? formatYardage(calculateDistanceYards(targetPos[0], targetPos[1], mapCenter[0], mapCenter[1])) : '---';
   const driveDistance = shotOrigin && userLocation ? calculateDistanceYards(shotOrigin[0], shotOrigin[1], userLocation[0], userLocation[1]) : 0;
+
+  // --- VIRTUAL CADDIE MOCK DATA (Replace with database props later) ---
+  const playerGarage = [
+    { club_name: 'Driver', distance: 280 },
+    { club_name: '3 Wood', distance: 250 },
+    { club_name: '4 Iron', distance: 210 },
+    { club_name: '7 Iron', distance: 165 },
+    { club_name: 'Pitching Wedge', distance: 135 },
+    { club_name: 'Sand Wedge', distance: 105 }
+  ];
+  const homeElevationFt = 500; 
+  const courseElevationFt = 5280; 
+
+  const caddieAdvice = getCaddieAdvice(distanceToCenter, courseElevationFt, homeElevationFt, playerGarage);
 
   let windCone = null;
   if (weather && targetPos && weather.windSpeed > 3) {
@@ -82,12 +121,8 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in">
       
-      {/* --- FLOATING LEFT STACK: WEATHER & MATCH INSIGHTS --- */}
-
+      {/* --- FLOATING LEFT STACK --- */}
       <div className="absolute top-20 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
-       
-        
-        {/* Minimal Weather Block */}
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2 px-3 flex items-center justify-between shadow-lg pointer-events-auto">
           {weather ? (
             <div className="flex items-center gap-2 font-mono text-[10px] font-black w-full justify-between">
@@ -104,24 +139,21 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
           )}
         </div>
 
-
-        {/* INTEGRATED MATCH INSIGHTS PANEL */}
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2.5 shadow-lg pointer-events-auto flex flex-col font-mono">
            <span className="text-[7px] font-black text-slate-500 uppercase tracking-wider mb-1 font-sans">Ryder Status</span>
            <div className="text-xs font-black text-orange-400 flex items-center gap-1">
              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping inline-block" />
-             {insights.status}
+             {insights?.status || 'All Square'}
            </div>
-           <div className="text-[9px] font-bold text-slate-400 mt-0.5">Thru 18</div>
+           <div className="text-[9px] font-bold text-slate-400 mt-0.5">{insights?.thru || 'Thru 1'}</div>
            <div className="text-[10px] font-black text-emerald-400 mt-1 border-t border-slate-800 pt-1 flex justify-between items-center">
              <span className="font-sans text-[7px] text-slate-600 uppercase font-black">Ledger</span>
-             <span>{insights.wagerStatus}</span>
+             <span>{insights?.wagerStatus || 'LIVE'}</span>
            </div>
         </div>
-
       </div>
 
-      {/* --- FLOATING RIGHT STACK: CONTROL BUTTONS --- */}
+      {/* --- FLOATING RIGHT STACK --- */}
       <div className="absolute top-20 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
         <button 
           onClick={onLogScoreClick}
@@ -143,17 +175,37 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
         </button>
       </div>
 
+      {/* --- VIRTUAL CADDIE HUD OVERLAY --- */}
+      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[400] pointer-events-none">
+        <div className="bg-indigo-950/80 backdrop-blur-md border border-indigo-500/30 px-5 py-2.5 rounded-full flex items-center gap-4 shadow-[0_0_20px_rgba(99,102,241,0.15)]">
+          <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Caddie</span>
+          <div className="w-px h-3 bg-indigo-500/50" />
+          
+          <div className="flex flex-col items-center">
+            <span className="text-[7px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">Plays Like</span>
+            <span className="text-sm font-black text-white font-mono leading-none">{caddieAdvice.playsLike}</span>
+          </div>
+
+          <div className="w-px h-3 bg-indigo-500/50" />
+          
+          <div className="flex flex-col items-center">
+            <span className="text-[7px] font-black uppercase tracking-widest text-slate-400 leading-none mb-0.5">Club</span>
+            <span className="text-sm font-black text-indigo-300 uppercase leading-none tracking-wider">{caddieAdvice.club}</span>
+          </div>
+        </div>
+      </div>
+
       {/* --- MAP CANVAS LAYER --- */}
       <div className="flex-1 z-0 relative">
-        <MapContainer center={mapCenter} zoom={17} zoomControl={false} className="absolute inset-0 h-full w-full">
+        <MapContainer center={mapCenter || [47.5142, -92.2372]} zoom={17} zoomControl={false} className="absolute inset-0 h-full w-full">
           <TileLayer url={tileUrl} maxZoom={20} attribution="&copy; Esri" />
-          <RecenterMap center={mapCenter} />
+          {mapCenter && <RecenterMap center={mapCenter} />}
           
           {windCone && <Polygon positions={windCone} pathOptions={{ color: 'transparent', fillColor: '#ef4444', fillOpacity: 0.15 }} />}
           {userLocation && targetPos && distanceToTarget !== '---' && <Polyline positions={[userLocation, targetPos, mapCenter]} pathOptions={{ color: '#fbbf24', dashArray: '6, 6', weight: 1.5 }} />}
           {shotOrigin && userLocation && <Polyline positions={[shotOrigin, userLocation]} pathOptions={{ color: '#f97316', weight: 2.5 }} />}
 
-          <CircleMarker center={mapCenter} radius={5} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, weight: 1.5 }} />
+          {mapCenter && <CircleMarker center={mapCenter} radius={5} pathOptions={{ color: '#ef4444', fillColor: '#ef4444', fillOpacity: 1, weight: 1.5 }} />}
           {userLocation && distanceToCenter !== '---' && <CircleMarker center={userLocation} radius={5} pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 1, weight: 1.5 }} />}
           {shotOrigin && userLocation && <CircleMarker center={shotOrigin} radius={3.5} pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 1, weight: 1.5 }} />}
 

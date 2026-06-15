@@ -213,20 +213,22 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
       )}
 
       {/* Timeline Round Selector Matrix */}
-      <div className="px-5 py-3 bg-black/30 border-b border-white/5 flex gap-2 overflow-x-auto sticky top-[61px] z-10 backdrop-blur-md">
-        {rounds.map((r) => (
-          <button
-            key={r}
-            onClick={() => setActiveRound(r)}
-            className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
-              activeRound === r 
-                ? 'bg-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.2)]' 
-                : 'bg-white/5 text-slate-400 border border-white/5 hover:bg-white/10'
-            }`}
-          >
-            Round {r}
-          </button>
-        ))}
+      <div className="bg-[#0f172a]/95 backdrop-blur-xl border-b border-white/5 sticky top-[60px] z-10">
+        <div className="px-5 py-3 flex gap-2 overflow-x-auto max-w-md mx-auto no-scrollbar">
+          {rounds.map((r) => (
+            <button
+              key={r}
+              onClick={() => setActiveRound(r)}
+              className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 ${
+                activeRound === r 
+                  ? 'bg-amber-500 text-black shadow-[0_0_15px_rgba(245,158,11,0.3)]' 
+                  : 'bg-white/5 text-slate-400 border border-white/5 hover:bg-white/10'
+              }`}
+            >
+              Round {r}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Matches Feed Log Timeline */}
