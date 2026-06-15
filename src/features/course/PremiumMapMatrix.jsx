@@ -7,21 +7,16 @@ import { useWeather } from '../../shared/hooks/useWeather';
 import { calculateDistanceYards } from '../../shared/utils/geoMath';
 
 // --- VIRTUAL CADDIE ENGINE ---
-// Physics: Ball travels ~2% further per 1,000 ft of elevation gain.
 function getCaddieAdvice(rawYardage, courseElevFt, homeElevFt, garage) {
   if (!rawYardage || rawYardage === '---') return { playsLike: '---', club: '--' };
 
-  // Calculate altitude density difference
   const elevationDiff = courseElevFt - homeElevFt;
-  
-  // If course is higher than home, ball flies further -> plays shorter
   const flightAdjustment = (elevationDiff / 1000) * 0.02;
   const playsLike = Math.round(rawYardage * (1 - flightAdjustment));
 
   let recommendedClub = '--';
   let closestDiff = Infinity;
 
-  // Scan the garage array to find the club that matches the "Plays Like" distance
   if (garage && garage.length > 0) {
     garage.forEach(item => {
       const diff = Math.abs(item.distance - playsLike);
@@ -68,19 +63,29 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const [targetPos, setTargetPos] = useState(null);
   const [shotOrigin, setShotOrigin] = useState(null);
   
+  // FIX: Track if target position was initialized for the current hole data instance
+  const [hasInitializedTarget, setHasInitializedTarget] = useState(false);
+  
   const { location: userLocation, isTracking, requestLocation } = useGeolocation();
   const mapCenter = holeData?.leafletCenter; 
   const weather = useWeather(mapCenter?.[0], mapCenter?.[1]);
 
+  // FIX: Reset initialization block when hole index increments
   useEffect(() => {
-    if (userLocation && mapCenter) {
-      setTargetPos([(userLocation[0] + mapCenter[0]) / 2, (userLocation[1] + mapCenter[1]) / 2]);
-    } else if (mapCenter) {
-      setTargetPos([mapCenter[0] - 0.0002, mapCenter[1] - 0.0002]);
-    }
-  }, [holeData, userLocation, mapCenter]); 
+    setHasInitializedTarget(false);
+  }, [holeData?.id]);
 
-  // --- SAFE YARDAGE CALCULATION (20,000 limit removed) ---
+  useEffect(() => {
+    if (mapCenter && !hasInitializedTarget) {
+      if (userLocation) {
+        setTargetPos([(userLocation[0] + mapCenter[0]) / 2, (userLocation[1] + mapCenter[1]) / 2]);
+      } else {
+        setTargetPos([mapCenter[0] - 0.0002, mapCenter[1] - 0.0002]);
+      }
+      setHasInitializedTarget(true);
+    }
+  }, [mapCenter, userLocation, hasInitializedTarget]); 
+
   const formatYardage = (val) => (val) ? val : '---';
 
   const distanceToCenter = userLocation && mapCenter ? formatYardage(calculateDistanceYards(userLocation[0], userLocation[1], mapCenter[0], mapCenter[1])) : '---';
@@ -91,7 +96,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const targetToPin = targetPos && mapCenter ? formatYardage(calculateDistanceYards(targetPos[0], targetPos[1], mapCenter[0], mapCenter[1])) : '---';
   const driveDistance = shotOrigin && userLocation ? calculateDistanceYards(shotOrigin[0], shotOrigin[1], userLocation[0], userLocation[1]) : 0;
 
-  // --- VIRTUAL CADDIE MOCK DATA (Replace with database props later) ---
   const playerGarage = [
     { club_name: 'Driver', distance: 280 },
     { club_name: '3 Wood', distance: 250 },
@@ -169,7 +173,12 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
         
         <button 
           onClick={() => setShotOrigin(shotOrigin ? null : userLocation)}
-          className={`pointer-events-auto px-3 h-8 text-[9px] font-black uppercase tracking-widest rounded-xl shadow-lg border transition-all active:scale-95 ${shotOrigin ? 'bg-orange-500 border-orange-400 text-white shadow-[0_0_10px_rgba(249,115,22,0.4)]' : 'bg-slate-900/80 border-slate-800/80 text-slate-400'}`}
+          className="pointer-events-auto px-3 h-8 text-[9px] font-black uppercase tracking-widest rounded-xl shadow-lg border transition-all active:scale-95 bg-slate-900/80 border-slate-800/80 text-slate-400"
+          style={{
+            backgroundColor: shotOrigin ? '#f97316' : '',
+            borderColor: shotOrigin ? '#fb923c' : '',
+            color: shotOrigin ? '#ffffff' : ''
+          }}
         >
           {shotOrigin ? `Tracker: ${driveDistance}y` : 'Mark Shot'}
         </button>
@@ -210,7 +219,18 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
           {shotOrigin && userLocation && <CircleMarker center={shotOrigin} radius={3.5} pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 1, weight: 1.5 }} />}
 
           {targetPos && (
-            <Marker position={targetPos} draggable={true} icon={targetIcon} eventHandlers={{ drag: (e) => setTargetPos([e.target.getLatLng().lat, e.target.getLatLng().lng]) }}>
+            <Marker 
+              position={targetPos} 
+              draggable={true} 
+              icon={targetIcon} 
+              eventHandlers={{ 
+                // FIX: Use dragend to lock location values smoothly without context loop disruption
+                dragend: (e) => {
+                  const latLng = e.target.getLatLng();
+                  setTargetPos([latLng.lat, latLng.lng]);
+                } 
+              }}
+            >
               <Tooltip permanent direction="top" className="!bg-slate-950/95 !backdrop-blur-md !text-yellow-400 !font-black !text-[10px] !border-slate-800 !rounded-xl !px-3 !py-1.5 !whitespace-nowrap !shadow-2xl" offset={[0, -12]}>
                 <div className="flex items-center space-x-3 font-mono">
                   <div className="flex flex-col items-center">

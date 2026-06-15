@@ -73,7 +73,6 @@ export default function PlayerIntroCard({
     }
   };
 
-  // Safely grab the theme or fall back to Base configuration layout parameters cleanly
   const activeTheme = themesCatalog[parallel] || themesCatalog['Base'] || themesCatalog['1/1'];
 
   // --- 3D TILT ENGINE ---
@@ -166,7 +165,14 @@ export default function PlayerIntroCard({
               {/* DISPLAY FRAME */}
               <div className="w-full h-[58%] my-auto relative px-1">
                 <div className={`w-full h-full bg-gradient-to-b ${activeTheme.frameClass} p-[1.5px] rounded-lg shadow-2xl`}>
-                  <div className="w-full h-full bg-slate-900 relative overflow-hidden rounded-[6px] flex items-center justify-center">
+                  <div 
+                    className="w-full h-full bg-slate-900 relative overflow-hidden rounded-[6px] flex items-center justify-center"
+                    style={{ 
+                      isolation: 'isolate', 
+                      transform: 'translateZ(0)', 
+                      WebkitMaskImage: '-webkit-radial-gradient(white, black)' 
+                    }}
+                  >
                     
                     {photoUrl ? (
                       isVideo ? (
@@ -176,7 +182,8 @@ export default function PlayerIntroCard({
                           loop 
                           muted 
                           playsInline
-                          className="w-full h-full object-contain contrast-[1.05] saturate-110 relative z-10"
+                          // CHANGED: object-contain fits full resolution, z-0 keeps it firmly stacked at the back
+                          className="w-full h-full object-contain relative z-0 contrast-[1.05] saturate-110"
                         />
                       ) : (
                         <img src={photoUrl} alt={playerName} className="w-full h-full object-cover object-top contrast-[1.05] saturate-110" />
@@ -188,7 +195,8 @@ export default function PlayerIntroCard({
                       </div>
                     )}
                     
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-20"></div>
+                    {/* CHANGED: Boosted overlay to z-10 so the gloss/shadow effect covers the contain-fitted video sides cleanly */}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-10"></div>
                   </div>
                 </div>
 
