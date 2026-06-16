@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useUser } from '../../context/UserContext';
 import { useScheduleData } from '../schedule/hooks/useScheduleData';
 import { useChirpsNotification } from '../chat/hooks/useChirpsNotifications';
@@ -12,6 +12,7 @@ export default function DashboardView({
   onNavigateToSchedule,
   onNavigateToVault,
   onNavigateToAdmin, 
+  onNavigateToMulligans, 
   isAdmin,           
   isChirpsOpen
 }) {
@@ -21,6 +22,17 @@ export default function DashboardView({
 
   const isClams = player?.team === 'Slanted Clams';
   const teamAccentHex = isClams ? '#3b82f6' : '#ef4444';
+
+  // State to control the 3-second entrance animation for the dice icon
+  const [animateDice, setAnimateDice] = useState(true);
+
+  // Handle the 3-second animation timeout on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAnimateDice(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, []);
 
   // --- AUTOMATED CALENDAR LOCK: INTROCARD MINT ENGINE ---
   useEffect(() => {
@@ -51,7 +63,7 @@ export default function DashboardView({
               captured_metadata: {
                 card_type: 'intro',
                 player_name: player.name,
-		player_team: player.team,
+                player_team: player.team,
                 parallel: 'Base',
                 serial_number: '#TOUR-CARD',
                 unlocked_timestamp: new Date()
@@ -116,12 +128,30 @@ export default function DashboardView({
               Fores V
             </h2>
             <div className="flex items-center gap-1.5 mt-1.5">
-              <span className="text-[7px] font-black text-[#34d399]/40 tracking-normal select-none font-mono">{"//"}</span>
               <p className="text-[9px] font-black uppercase tracking-[0.22em] text-[#34d399] drop-shadow-[0_0_12px_rgba(52,211,153,0.4)] group-hover:text-white transition-colors duration-500 truncate">
                 Land Of 10,000 Putts
               </p>
             </div>
           </div>
+
+          {/* Unassuming, stylized SVG Dice Icon as the backdoor Mulligans Arena entrance */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onNavigateToMulligans) onNavigateToMulligans();
+            }}
+            type="button"
+            className={`w-8 h-8 rounded-xl bg-slate-950/40 border flex items-center justify-center transition-all relative z-30 shrink-0 shadow-inner ${
+              animateDice 
+                ? 'animate-spin border-amber-500/40 text-amber-400 [animation-duration:1.5s]' 
+                : 'border-white/5 text-slate-500 hover:text-amber-400 hover:border-amber-500/30 active:scale-90'
+            }`}
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM18 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM6 18.72a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM6 6.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5ZM12 12.75a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5Z" />
+              <rect width="18" height="18" x="3" y="3" rx="4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
 
         {/* INTEGRATED MATCH ROSTER STATUS GREETING */}

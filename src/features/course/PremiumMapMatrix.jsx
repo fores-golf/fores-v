@@ -6,7 +6,7 @@ import { useGeolocation } from '../../shared/hooks/useGeolocation';
 import { useWeather } from '../../shared/hooks/useWeather';
 import { calculateDistanceYards } from '../../shared/utils/geoMath';
 
-// --- VIRTUAL CADDIE ENGINE ---
+// --- VIRTUAL CADDIE PHYSICS ENGINE ---
 function getCaddieAdvice(rawYardage, courseElevFt, homeElevFt, garage) {
   if (!rawYardage || rawYardage === '---') return { playsLike: '---', club: '--' };
 
@@ -62,18 +62,19 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const [mapType, setMapType] = useState('satellite');
   const [targetPos, setTargetPos] = useState(null);
   const [shotOrigin, setShotOrigin] = useState(null);
-  
-  // FIX: Track if target position was initialized for the current hole data instance
   const [hasInitializedTarget, setHasInitializedTarget] = useState(false);
+  
+  // WIRED: Local state tracking to control the Pro Tips drawer overlay
+  const [showProTips, setShowProTips] = useState(false);
   
   const { location: userLocation, isTracking, requestLocation } = useGeolocation();
   const mapCenter = holeData?.leafletCenter; 
   const weather = useWeather(mapCenter?.[0], mapCenter?.[1]);
 
-  // FIX: Reset initialization block when hole index increments
   useEffect(() => {
     setHasInitializedTarget(false);
-  }, [holeData?.id]);
+    setShowProTips(false); // Auto-collapse the description drawer when a user increments holes
+  }, [holeData?.id || holeData?.hole_number]);
 
   useEffect(() => {
     if (mapCenter && !hasInitializedTarget) {
@@ -104,8 +105,10 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     { club_name: 'Pitching Wedge', distance: 135 },
     { club_name: 'Sand Wedge', distance: 105 }
   ];
+  
   const homeElevationFt = 500; 
-  const courseElevationFt = 5280; 
+  // WIRED: Dynamically reads your Supabase elevation column, falling back to Giants Ridge standard if null
+  const courseElevationFt = holeData?.elevation_green_ft || 1450; 
 
   const caddieAdvice = getCaddieAdvice(distanceToCenter, courseElevationFt, homeElevationFt, playerGarage);
 
@@ -184,10 +187,34 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
         </button>
       </div>
 
-      {/* --- VIRTUAL CADDIE HUD OVERLAY --- */}
-      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[400] pointer-events-none">
-        <div className="bg-indigo-950/80 backdrop-blur-md border border-indigo-500/30 px-5 py-2.5 rounded-full flex items-center gap-4 shadow-[0_0_20px_rgba(99,102,241,0.15)]">
-          <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Caddie</span>
+      {/* --- RE-WIRED: VIRTUAL CADDIE HUD INTERACTIVE OVERLAY --- */}
+      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[400] flex flex-col items-center gap-2 w-full max-w-[290px]">
+        
+        {/* Dynamic Expandable Description Box */}
+        {showProTips && holeData?.hole_tips && (
+          <div className="bg-indigo-950/95 backdrop-blur-xl border border-indigo-500/40 p-3 rounded-2xl shadow-2xl text-left animate-slide-up max-w-[280px]">
+            <span className="text-[7px] font-black uppercase text-indigo-400 tracking-[0.2em] block mb-1">
+              Giants Ridge Strategy Guide
+            </span>
+            <p className="text-[10px] text-slate-300 font-medium leading-relaxed font-sans text-justify">
+              {holeData.hole_tips}
+            </p>
+          </div>
+        )}
+
+        {/* Caddie Controller Capsule Wrapper */}
+        <div 
+          onClick={() => holeData?.hole_tips && setShowProTips(!showProTips)}
+          className={`bg-indigo-950/80 backdrop-blur-md border border-indigo-500/30 px-5 py-2.5 rounded-full flex items-center gap-4 shadow-[0_0_20px_rgba(99,102,241,0.15)] pointer-events-auto cursor-pointer select-none transition-all active:scale-95 ${holeData?.hole_tips ? 'hover:border-indigo-400' : ''}`}
+        >
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-black uppercase tracking-widest text-indigo-400">Caddie</span>
+            {holeData?.hole_tips && (
+              <span className="text-[8px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1 py-0.2 rounded-sm transform scale-90">
+                {showProTips ? "Hide Tips" : "Pro Tips"}
+              </span>
+            )}
+          </div>
           <div className="w-px h-3 bg-indigo-500/50" />
           
           <div className="flex flex-col items-center">
@@ -224,7 +251,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
               draggable={true} 
               icon={targetIcon} 
               eventHandlers={{ 
-                // FIX: Use dragend to lock location values smoothly without context loop disruption
                 dragend: (e) => {
                   const latLng = e.target.getLatLng();
                   setTargetPos([latLng.lat, latLng.lng]);

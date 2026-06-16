@@ -18,6 +18,9 @@ import CardCollectionView from './features/achievements/CardCollectionView';
 // Import the new administrator screen
 import AdminConsoleView from './features/admin/AdminConsoleView';
 
+// WIRED: Imported your newly built points competition ledger component
+import MulligansMatrixView from './features/betting/MulligansMatrixView';
+
 // --- MAIN ROUTER LOGIC ---
 function AppRouter() {
   const { session, player, isAuthLoading } = useUser();
@@ -64,9 +67,9 @@ function AppRouter() {
           onNavigateToLeaderboard={() => setCurrentView('leaderboard')} 
           onNavigateToSchedule={() => setCurrentView('schedule')}
           onNavigateToVault={() => setCurrentView('vault')}
-          // Pass down the navigation launcher callback for your Admin view
           onNavigateToAdmin={() => setCurrentView('admin')}
-          // Expose permission state down to the UI
+          // WIRED: Router state callback configuration hooked to your sidebar navigation target
+          onNavigateToMulligans={() => setCurrentView('mulligans')}
           isAdmin={isAdminUser}
           isChirpsOpen={currentView === 'chirps'}
         />
@@ -94,6 +97,11 @@ function AppRouter() {
             setCurrentView('schedule');
           }} 
         />
+      )}
+
+      {/* WIRED: Mount Mulligans Ledger Arena view when triggered */}
+      {currentView === 'mulligans' && (
+        <MulligansMatrixView onBack={() => setCurrentView('dashboard')} />
       )}
 
       {/* Hidden Trading Card Inventory System View */}

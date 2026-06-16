@@ -85,16 +85,12 @@ export default function ChirpsView({ onBack }) {
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"></path></svg>
           Hub
         </button>
-        <h1 className="font-black text-lg tracking-tight uppercase italic flex items-center gap-1.5" onClick={triggerMockBotBroadcast}>
+        <h1 className="font-black text-lg tracking-tight uppercase italic flex items-center gap-1.5 mx-auto" onClick={triggerMockBotBroadcast}>
           <span className="w-2 h-2 rounded-full bg-[#34d399] animate-pulse"></span>
           Chirps Board
         </h1>
-        <button 
-          onClick={() => sendChirp('Check out my stats layout! [COMBINE_STAT]')}
-          className="text-[10px] font-black tracking-widest uppercase text-amber-500 border border-amber-500/30 px-2.5 py-1 rounded-lg bg-amber-500/5 active:scale-95 transition-transform"
-        >
-          Share Stats
-        </button>
+        {/* STAT SHARE BUTTON REMOVED FROM THIS LOCATION */}
+        <div className="w-9 h-5 pointer-events-none" /> {/* Empty spatial stabilizer to keep title cleanly centered */}
       </div>
 
       {/* --- CHAT TIMELINE CONTAINER --- */}
