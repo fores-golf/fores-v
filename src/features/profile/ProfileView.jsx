@@ -2,12 +2,25 @@ import React, { useState, useRef } from 'react';
 import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
 
+const AVAILABLE_BADGES = [
+  { id: 'b1', name: 'Double Par', imageUrl: '/assets/badges/dk.png', description: 'Two pars or better on trip' },
+  { id: 'b2', name: 'Triple Par', imageUrl: '/assets/badges/tk.png', description: 'Three pars or better on trip' },
+  { id: 'b3', name: 'Overpar', imageUrl: '/assets/badges/ok.png', description: 'Four pars or better on trip' },
+  { id: 'b4', name: 'Partacular', imageUrl: '/assets/badges/kt.png', description: 'Five pars or better on trip' },
+  { id: 'b5', name: 'Partrocity', imageUrl: '/assets/badges/ktr.png', description: 'Six pars or better on trip' },
+  { id: 'b6', name: 'Paramanjaro', imageUrl: '/assets/badges/km.png', description: 'Seven pars or better on trip' },
+  { id: 'b7', name: 'Partastophe', imageUrl: '/assets/badges/kts.png', description: 'Eight pars or better on trip' },
+  { id: 'b8', name: 'Parpocalypse', imageUrl: '/assets/badges/kp.png', description: 'Nine pars or better on trip' },
+  { id: 'b9', name: 'Parrionaire', imageUrl: '/assets/badges/kym.png', description: 'Ten pars or better on trip' },
+];
+
 export default function ProfileView({ onBack }) {
   const { player, logout, refreshIdentity } = useUser();
   
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isEquipping, setIsEquipping] = useState(false);
   
   // Local form state
   const [formData, setFormData] = useState({
@@ -26,8 +39,36 @@ export default function ProfileView({ onBack }) {
 
   const isClams = player.team === 'Slanted Clams';
 
+  // Extract currently equipped badge
+  const currentBadge = AVAILABLE_BADGES.find(b => b.id === player.equipped_badge_id);
+
+  // Unlocked badges mapping context
+  const unlockedBadges = AVAILABLE_BADGES; 
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // --- BADGE EQUIP ENGINE ---
+  const handleEquipBadge = async (badgeId) => {
+    if (isEquipping) return;
+    setIsEquipping(true);
+    try {
+      const nextBadgeId = player.equipped_badge_id === badgeId ? null : badgeId;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ equipped_badge_id: nextBadgeId })
+        .eq('id', player.id);
+
+      if (error) throw error;
+      
+      await refreshIdentity();
+    } catch (error) {
+      alert('Error equipping badge: ' + error.message);
+    } finally {
+      setIsEquipping(false);
+    }
   };
 
   // --- IMAGE UPLOAD ENGINE ---
@@ -37,32 +78,25 @@ export default function ProfileView({ onBack }) {
       setIsUploading(true);
       
       const file = e.target.files[0];
-      // Create a unique file name using their ID
       const fileExt = file.name.split('.').pop();
-      // Added a timestamp to the filename to force the browser to bust the image cache
       const filePath = `${player.id}/avatar_${Date.now()}.${fileExt}`;
 
-      // 1. Upload to Supabase Storage
       const { error: uploadError } = await supabase.storage
         .from('avatars')
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) throw uploadError;
 
-      // 2. Get the public URL
       const { data: { publicUrl } } = supabase.storage
         .from('avatars')
         .getPublicUrl(filePath);
 
-      // 3. Save the URL to their profile table
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ avatar_url: publicUrl })
         .eq('id', player.id);
 
       if (updateError) throw updateError;
-
-      // 4. Force global app refresh to show new picture
       await refreshIdentity();
       
     } catch (error) {
@@ -102,6 +136,9 @@ export default function ProfileView({ onBack }) {
     }
   };
 
+  // Shared classes for the custom animated Tailwind sparkle sweep
+  const shimmerTailwindClasses = "relative overflow-hidden after:absolute after:inset-0 after:w-[200%] after:-translate-x-full after:animate-[shimmer_2.5s_infinite_linear] after:bg-gradient-to-r after:from-transparent after:via-white/40 after:to-transparent";
+
   return (
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
       
@@ -132,32 +169,47 @@ export default function ProfileView({ onBack }) {
           
           <div className="flex flex-col items-center mb-6 relative z-10 text-center">
             
-            {/* --- AVATAR UPLOAD SECTOR (Now un-restricted!) --- */}
-            <div 
-              className="relative mb-4 group cursor-pointer" 
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className={`w-24 h-24 rounded-full border-4 ${isClams ? 'border-blue-500/50' : 'border-red-500/50'} overflow-hidden bg-black/50 flex items-center justify-center relative shadow-xl`}>
-                {isUploading ? (
-                  <span className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
-                ) : player.avatar_url ? (
-                  <img src={player.avatar_url} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <span className="text-3xl font-black text-slate-600">{player.name.charAt(0)}</span>
-                )}
-                
-                {/* Edit overlay (Now always active on hover/tap) */}
-                <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            {/* --- AVATAR UPLOAD SECTOR WITH LIVE BADGE OVERLAY --- */}
+            <div className="relative mb-4">
+              <div 
+                className="relative group cursor-pointer" 
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <div className={`w-24 h-24 rounded-full border-4 ${isClams ? 'border-blue-500/50' : 'border-red-500/50'} overflow-hidden bg-black/50 flex items-center justify-center relative shadow-xl`}>
+                  {isUploading ? (
+                    <span className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
+                  ) : player.avatar_url ? (
+                    <img src={player.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-3xl font-black text-slate-600">{player.name.charAt(0)}</span>
+                  )}
+                  
+                  <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                  </div>
                 </div>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleImageUpload} 
+                  accept="image/*" 
+                  className="hidden" 
+                />
               </div>
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleImageUpload} 
-                accept="image/*" 
-                className="hidden" 
-              />
+
+              {/* LIVE EQUIPPED BADGE PIN (With black transparent mix-blend + Tailwind Sparkle) */}
+              {currentBadge && (
+                <div 
+                  className={`absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#090d16] border-2 border-amber-400 flex items-center justify-center p-0.5 shadow-lg ${shimmerTailwindClasses}`}
+                  title={currentBadge.name}
+                >
+                  <img 
+                    src={currentBadge.imageUrl} 
+                    alt={currentBadge.name} 
+                    className="w-full h-full object-contain mix-blend-screen scale-110"
+                  />
+                </div>
+              )}
             </div>
 
             {/* --- NAME & ARCHETYPE --- */}
@@ -200,6 +252,55 @@ export default function ProfileView({ onBack }) {
           </div>
         </div>
 
+        {/* --- TROPHY CASE SECTION --- */}
+        <section className="space-y-3">
+          <div className="flex justify-between items-center px-1">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Trophy Case</h3>
+            <span className="text-[9px] font-bold text-amber-500/80 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 uppercase tracking-wider">
+              Tap to Equip
+            </span>
+          </div>
+
+          <div className="bg-white/5 border border-white/5 rounded-2xl p-4 shadow-md backdrop-blur-md grid grid-cols-4 gap-3">
+            {unlockedBadges.map((badge) => {
+              const isEquipped = player.equipped_badge_id === badge.id;
+              return (
+                <button
+                  key={badge.id}
+                  onClick={() => handleEquipBadge(badge.id)}
+                  disabled={isEquipping}
+                  className={`relative flex flex-col items-center justify-center p-2.5 rounded-xl transition-all duration-200 active:scale-95 ${
+                    isEquipped 
+                      ? 'bg-amber-500/10 border-2 border-amber-400 shadow-md shadow-amber-500/5' 
+                      : 'bg-black/20 border border-white/5 hover:border-white/10'
+                  }`}
+                >
+                  {/* PNG Container Layout (Removes Black BG instantly via mix-blend-screen + custom shimmer) */}
+                  <div className={`w-12 h-12 mb-1 flex items-center justify-center rounded-lg ${shimmerTailwindClasses}`}>
+                    <img 
+                      src={badge.imageUrl} 
+                      alt={badge.name} 
+                      className="w-full h-full object-contain mix-blend-screen scale-110"
+                    />
+                  </div>
+
+                  <span className="text-[9px] font-black tracking-tight text-slate-300 text-center line-clamp-1 w-full">
+                    {badge.name}
+                  </span>
+
+                  {/* Equipped Micro-Indicator */}
+                  {isEquipped && (
+                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         {/* SCOUTING COMBINE METRICS */}
         <section className="space-y-3">
           <div className="flex justify-between items-center px-1">
@@ -207,7 +308,6 @@ export default function ProfileView({ onBack }) {
           </div>
 
           <div className="bg-white/5 border border-white/5 rounded-2xl shadow-md backdrop-blur-md overflow-hidden">
-            
             {/* Driving Dist */}
             <div className="flex justify-between items-center p-4 border-b border-white/5">
               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Avg Driving Dist</span>
