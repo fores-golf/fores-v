@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { MapContainer, TileLayer, CircleMarker, Marker, Polyline, Polygon, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { supabase } from '../../config/supabaseClient';
+import { useUser } from '../../context/UserContext';
 import { useGeolocation } from '../../shared/hooks/useGeolocation';
 import { useWeather } from '../../shared/hooks/useWeather';
 import { calculateDistanceYards } from '../../shared/utils/geoMath';
@@ -59,12 +61,11 @@ const targetIcon = new L.divIcon({
 });
 
 export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }) {
+  const { player, refreshIdentity } = useUser();
   const [mapType, setMapType] = useState('satellite');
   const [targetPos, setTargetPos] = useState(null);
   const [shotOrigin, setShotOrigin] = useState(null);
   const [hasInitializedTarget, setHasInitializedTarget] = useState(false);
-  
-  // WIRED: Local state tracking to control the Pro Tips drawer overlay
   const [showProTips, setShowProTips] = useState(false);
   
   const { location: userLocation, isTracking, requestLocation } = useGeolocation();
@@ -73,7 +74,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
 
   useEffect(() => {
     setHasInitializedTarget(false);
-    setShowProTips(false); // Auto-collapse the description drawer when a user increments holes
+    setShowProTips(false); 
   }, [holeData?.id || holeData?.hole_number]);
 
   useEffect(() => {
@@ -107,7 +108,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   ];
   
   const homeElevationFt = 500; 
-  // WIRED: Dynamically reads your Supabase elevation column, falling back to Giants Ridge standard if null
   const courseElevationFt = holeData?.elevation_green_ft || 1450; 
 
   const caddieAdvice = getCaddieAdvice(distanceToCenter, courseElevationFt, homeElevationFt, playerGarage);
@@ -124,6 +124,88 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const tileUrl = mapType === 'satellite' 
     ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}";
+
+
+  // --- INTERNAL DATABASE INJECTION ENGINE ---
+  const handleInlineSaveScore = async (sheetData) => {
+    if (!player || !holeData) return;
+
+    try {
+      // 🎯 Direct Mapping: We already have the true holes record sitting in `holeData`
+      const dbPayload = {
+        profile_id: player.id,
+        matchup_id: Number(insights?.matchupId || 7),
+        hole_number: Number(holeData.hole_number),
+        hole_id: Number(holeData.id), // Aligns perfectly to the ID in the holes table
+        gross_score: Number(sheetData.score || 0),
+        putts: Number(sheetData.putts || 0),
+        accuracy: sheetData.accuracy || '',
+        penalty_strokes: Number(sheetData.penalties || 0),
+        water_balls: Number(sheetData.water || 0),
+        drinks: Number(sheetData.drinks || 0),
+        par: Number(holeData.par) // Pulls the real par right off the holes table data in memory
+      };
+
+      console.log("🔥 THE DB PAYLOAD BEING SENT:", dbPayload);
+
+      // Insert/Upsert straight to Supabase
+      const { error: saveError } = await supabase
+        .from('hole_scores')
+        .upsert(dbPayload, { onConflict: 'profile_id, hole_number, matchup_id' });
+
+      if (saveError) throw saveError;
+
+      // Scan flat history immediately for new streak milestones
+      const { data: scores, error: fetchError } = await supabase
+        .from('hole_scores')
+        .select('gross_score, par')
+        .eq('profile_id', player.id)
+        .order('updated_at', { ascending: true });
+
+      if (fetchError) throw fetchError;
+
+      if (scores && scores.length > 0) {
+        let maxStreak = 0;
+        let currentStreak = 0;
+
+        scores.forEach((hole) => {
+          // Extra safety check in JS memory for the streak logic
+          if (hole.gross_score !== null && hole.par !== null && hole.gross_score <= hole.par) {
+            currentStreak++;
+            if (currentStreak > maxStreak) maxStreak = currentStreak;
+          } else {
+            currentStreak = 0;
+          }
+        });
+
+        const badgeTiers = [
+          { id: 'b1', target: 2 }, { id: 'b2', target: 3 }, { id: 'b3', target: 4 },
+          { id: 'b4', target: 5 }, { id: 'b5', target: 6 }, { id: 'b6', target: 7 },
+          { id: 'b7', target: 8 }, { id: 'b8', target: 9 }, { id: 'b9', target: 10 }
+        ];
+
+        const currentlyUnlocked = player.unlocked_badges || [];
+        const newUnlocks = badgeTiers
+          .filter(tier => maxStreak >= tier.target && !currentlyUnlocked.includes(tier.id))
+          .map(tier => tier.id);
+
+        if (newUnlocks.length > 0) {
+          const { error: patchError } = await supabase
+            .from('profiles')
+            .update({ unlocked_badges: [...currentlyUnlocked, ...newUnlocks] })
+            .eq('id', player.id);
+
+          if (patchError) throw patchError;
+        }
+      }
+
+      await refreshIdentity();
+
+    } catch (error) {
+      console.error("Error saving score inline:", error.message);
+      alert("Error saving score: " + error.message);
+    }
+  };
 
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in">
@@ -163,7 +245,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       {/* --- FLOATING RIGHT STACK --- */}
       <div className="absolute top-20 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
         <button 
-          onClick={onLogScoreClick}
+          onClick={() => onLogScoreClick(handleInlineSaveScore)}
           className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95"
         >
           Log Score
@@ -187,10 +269,8 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
         </button>
       </div>
 
-      {/* --- RE-WIRED: VIRTUAL CADDIE HUD INTERACTIVE OVERLAY --- */}
+      {/* --- VIRTUAL CADDIE HUD INTERACTIVE OVERLAY --- */}
       <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[400] flex flex-col items-center gap-2 w-full max-w-[290px]">
-        
-        {/* Dynamic Expandable Description Box */}
         {showProTips && holeData?.hole_tips && (
           <div className="bg-indigo-950/95 backdrop-blur-xl border border-indigo-500/40 p-3 rounded-2xl shadow-2xl text-left animate-slide-up max-w-[280px]">
             <span className="text-[7px] font-black uppercase text-indigo-400 tracking-[0.2em] block mb-1">
@@ -202,7 +282,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
           </div>
         )}
 
-        {/* Caddie Controller Capsule Wrapper */}
         <div 
           onClick={() => holeData?.hole_tips && setShowProTips(!showProTips)}
           className={`bg-indigo-950/80 backdrop-blur-md border border-indigo-500/30 px-5 py-2.5 rounded-full flex items-center gap-4 shadow-[0_0_20px_rgba(99,102,241,0.15)] pointer-events-auto cursor-pointer select-none transition-all active:scale-95 ${holeData?.hole_tips ? 'hover:border-indigo-400' : ''}`}

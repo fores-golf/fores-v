@@ -120,7 +120,7 @@ export default function CardMintingProtocol({ mintData, onComplete }) {
           is_in_pack: false, 
           minted_at: new Date(),
           mint_number: isNaN(currentMintNum) ? 1 : currentMintNum, 
-          raw_user_meta_data: {
+          metadata: {
             ...metadataPayload,
             parallel: t.tier,
             serial_number: t.serial

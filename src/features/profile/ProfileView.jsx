@@ -1,17 +1,28 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
 
+// --- DIRECT ASSET IMPORTS ---
+import dkImg from '/assets/badges/dk.png';
+import tkImg from '/assets/badges/tk.png';
+import okImg from '/assets/badges/ok.png';
+import ktImg from '/assets/badges/kt.png';
+import ktrImg from '/assets/badges/ktr.png';
+import kmImg from '/assets/badges/km.png';
+import ktsImg from '/assets/badges/kts.png';
+import kpImg from '/assets/badges/kp.png';
+import kymImg from '/assets/badges/kym.png';
+
 const AVAILABLE_BADGES = [
-  { id: 'b1', name: 'Double Par', imageUrl: '/assets/badges/dk.png', description: 'Two pars or better on trip' },
-  { id: 'b2', name: 'Triple Par', imageUrl: '/assets/badges/tk.png', description: 'Three pars or better on trip' },
-  { id: 'b3', name: 'Overpar', imageUrl: '/assets/badges/ok.png', description: 'Four pars or better on trip' },
-  { id: 'b4', name: 'Partacular', imageUrl: '/assets/badges/kt.png', description: 'Five pars or better on trip' },
-  { id: 'b5', name: 'Partrocity', imageUrl: '/assets/badges/ktr.png', description: 'Six pars or better on trip' },
-  { id: 'b6', name: 'Paramanjaro', imageUrl: '/assets/badges/km.png', description: 'Seven pars or better on trip' },
-  { id: 'b7', name: 'Partastophe', imageUrl: '/assets/badges/kts.png', description: 'Eight pars or better on trip' },
-  { id: 'b8', name: 'Parpocalypse', imageUrl: '/assets/badges/kp.png', description: 'Nine pars or better on trip' },
-  { id: 'b9', name: 'Parrionaire', imageUrl: '/assets/badges/kym.png', description: 'Ten pars or better on trip' },
+  { id: 'b1', name: 'Double Par', targetStreak: 2, imageAsset: dkImg, description: 'Two pars or better in a row' },
+  { id: 'b2', name: 'Triple Par', targetStreak: 3, imageAsset: tkImg, description: 'Three pars or better in a row' },
+  { id: 'b3', name: 'Overpar', targetStreak: 4, imageAsset: okImg, description: 'Four pars or better in a row' },
+  { id: 'b4', name: 'Partacular', targetStreak: 5, imageAsset: ktImg, description: 'Five pars or better in a row' },
+  { id: 'b5', name: 'Partrocity', targetStreak: 6, imageAsset: ktrImg, description: 'Six pars or better in a row' },
+  { id: 'b6', name: 'Paramanjaro', targetStreak: 7, imageAsset: kmImg, description: 'Seven pars or better in a row' },
+  { id: 'b7', name: 'Partastophe', targetStreak: 8, imageAsset: ktsImg, description: 'Eight pars or better in a row' },
+  { id: 'b8', name: 'Parpocalypse', targetStreak: 9, imageAsset: kpImg, description: 'Nine pars or better in a row' },
+  { id: 'b9', name: 'Parrionaire', targetStreak: 10, imageAsset: kymImg, description: 'Ten pars or better in a row' },
 ];
 
 export default function ProfileView({ onBack }) {
@@ -21,7 +32,14 @@ export default function ProfileView({ onBack }) {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isEquipping, setIsEquipping] = useState(false);
+  const [isCheckingBadges, setIsCheckingBadges] = useState(false);
   
+  // Animation states
+  const [spinningBadges, setSpinningBadges] = useState({});
+  const [mainPinSpinning, setMainPinSpinning] = useState(false);
+  
+  const lastTapRef = useRef({ id: null, time: 0 });
+
   // Local form state
   const [formData, setFormData] = useState({
     name: player?.name || '',
@@ -35,22 +53,103 @@ export default function ProfileView({ onBack }) {
 
   const fileInputRef = useRef(null);
 
+  useEffect(() => {
+    if (player?.id) {
+      checkAndAwardBadges();
+    }
+  }, [player?.id]);
+
   if (!player) return null;
 
   const isClams = player.team === 'Slanted Clams';
-
-  // Extract currently equipped badge
   const currentBadge = AVAILABLE_BADGES.find(b => b.id === player.equipped_badge_id);
-
-  // Unlocked badges mapping context
-  const unlockedBadges = AVAILABLE_BADGES; 
+  const unlockedBadgeIds = player.unlocked_badges || []; 
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  // --- BADGE EQUIP ENGINE ---
-  const handleEquipBadge = async (badgeId) => {
+  // --- STREAK CALCULATION ENGINE (UPDATED FOR DIRECT PAR COLUMN) ---
+  const checkAndAwardBadges = async () => {
+    try {
+      setIsCheckingBadges(true);
+      
+      // Pull gross_score and par directly from the flat hole_scores table
+      const { data: scores, error } = await supabase
+        .from('hole_scores')
+        .select('gross_score, par, updated_at')
+        .eq('profile_id', player.id)
+        .order('updated_at', { ascending: true });
+
+      if (error) throw error;
+      if (!scores || scores.length === 0) return;
+
+      let maxStreak = 0;
+      let currentStreak = 0;
+
+      scores.forEach((hole) => {
+        const grossScore = hole.gross_score;
+        const targetPar = hole.par;
+
+        if (grossScore !== null && targetPar !== undefined && targetPar !== null && grossScore <= targetPar) {
+          currentStreak++;
+          if (currentStreak > maxStreak) {
+            maxStreak = currentStreak;
+          }
+        } else {
+          currentStreak = 0; // Streak broken, resets but retains max
+        }
+      });
+
+      const badgesToUnlock = AVAILABLE_BADGES.filter(badge => {
+        return maxStreak >= badge.targetStreak && !unlockedBadgeIds.includes(badge.id);
+      }).map(b => b.id);
+
+      if (badgesToUnlock.length > 0) {
+        const updatedUnlockedList = [...unlockedBadgeIds, ...badgesToUnlock];
+        
+        const { error: patchError } = await supabase
+          .from('profiles')
+          .update({ unlocked_badges: updatedUnlockedList })
+          .eq('id', player.id);
+
+        if (patchError) throw patchError;
+        await refreshIdentity();
+      }
+    } catch (err) {
+      console.error('Error in lifetime badge engine:', err.message);
+    } finally {
+      setIsCheckingBadges(false);
+    }
+  };
+
+  // --- DUAL INTERACTION HANDLER (TAP TO EQUIP / DOUBLE TAP TO SPIN) ---
+  const handleBadgeInteraction = (badgeId) => {
+    if (!unlockedBadgeIds.includes(badgeId)) return;
+
+    const now = Date.now();
+    const DOUBLE_TAP_DELAY = 300; 
+    
+    if (lastTapRef.current.id === badgeId && (now - lastTapRef.current.time) < DOUBLE_TAP_DELAY) {
+      setSpinningBadges(prev => ({ ...prev, [badgeId]: true }));
+      setTimeout(() => {
+        setSpinningBadges(prev => ({ ...prev, [badgeId]: false }));
+      }, 600);
+      
+      lastTapRef.current = { id: null, time: 0 };
+    } else {
+      lastTapRef.current = { id: badgeId, time: now };
+      
+      setTimeout(() => {
+        if (lastTapRef.current.id === badgeId) {
+          executeEquipBadge(badgeId);
+          lastTapRef.current = { id: null, time: 0 };
+        }
+      }, DOUBLE_TAP_DELAY);
+    }
+  };
+
+  const executeEquipBadge = async (badgeId) => {
     if (isEquipping) return;
     setIsEquipping(true);
     try {
@@ -62,13 +161,18 @@ export default function ProfileView({ onBack }) {
         .eq('id', player.id);
 
       if (error) throw error;
-      
       await refreshIdentity();
     } catch (error) {
       alert('Error equipping badge: ' + error.message);
     } finally {
       setIsEquipping(false);
     }
+  };
+
+  const triggerMainPinSpin = () => {
+    if (mainPinSpinning) return;
+    setMainPinSpinning(true);
+    setTimeout(() => setMainPinSpinning(false), 600);
   };
 
   // --- IMAGE UPLOAD ENGINE ---
@@ -98,7 +202,6 @@ export default function ProfileView({ onBack }) {
 
       if (updateError) throw updateError;
       await refreshIdentity();
-      
     } catch (error) {
       alert('Error uploading image: ' + error.message);
     } finally {
@@ -126,7 +229,6 @@ export default function ProfileView({ onBack }) {
         .eq('id', player.id);
 
       if (error) throw error;
-      
       await refreshIdentity();
       setIsEditing(false);
     } catch (error) {
@@ -136,8 +238,10 @@ export default function ProfileView({ onBack }) {
     }
   };
 
-  // Shared classes for the custom animated Tailwind sparkle sweep
   const shimmerTailwindClasses = "relative overflow-hidden after:absolute after:inset-0 after:w-[200%] after:-translate-x-full after:animate-[shimmer_2.5s_infinite_linear] after:bg-gradient-to-r after:from-transparent after:via-white/40 after:to-transparent";
+
+  // Filter available badges so only earned ones render
+  const earnedBadges = AVAILABLE_BADGES.filter(badge => unlockedBadgeIds.includes(badge.id));
 
   return (
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
@@ -169,7 +273,7 @@ export default function ProfileView({ onBack }) {
           
           <div className="flex flex-col items-center mb-6 relative z-10 text-center">
             
-            {/* --- AVATAR UPLOAD SECTOR WITH LIVE BADGE OVERLAY --- */}
+            {/* --- AVATAR SECTOR WITH LIVE OVERLAY --- */}
             <div className="relative mb-4">
               <div 
                 className="relative group cursor-pointer" 
@@ -197,18 +301,20 @@ export default function ProfileView({ onBack }) {
                 />
               </div>
 
-              {/* LIVE EQUIPPED BADGE PIN (With black transparent mix-blend + Tailwind Sparkle) */}
+              {/* LIVE EQUIPPED PIN */}
               {currentBadge && (
-                <div 
-                  className={`absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#090d16] border-2 border-amber-400 flex items-center justify-center p-0.5 shadow-lg ${shimmerTailwindClasses}`}
-                  title={currentBadge.name}
+                <button 
+                  onClick={triggerMainPinSpin}
+                  className={`absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#090d16] border-2 border-amber-400 flex items-center justify-center p-0.5 shadow-lg [transform-style:preserve-3d] transition-transform duration-500 ease-out ${shimmerTailwindClasses} ${
+                    mainPinSpinning ? '[transform:rotateY(360deg)]' : ''
+                  }`}
                 >
                   <img 
-                    src={currentBadge.imageUrl} 
+                    src={currentBadge.imageAsset} 
                     alt={currentBadge.name} 
                     className="w-full h-full object-contain mix-blend-screen scale-110"
                   />
-                </div>
+                </button>
               )}
             </div>
 
@@ -256,48 +362,57 @@ export default function ProfileView({ onBack }) {
         <section className="space-y-3">
           <div className="flex justify-between items-center px-1">
             <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Trophy Case</h3>
-            <span className="text-[9px] font-bold text-amber-500/80 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 uppercase tracking-wider">
-              Tap to Equip
+            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+              {isCheckingBadges ? 'Scanning Scores...' : 'Tap: Equip • Double Tap: Spin'}
             </span>
           </div>
 
-          <div className="bg-white/5 border border-white/5 rounded-2xl p-4 shadow-md backdrop-blur-md grid grid-cols-4 gap-3">
-            {unlockedBadges.map((badge) => {
-              const isEquipped = player.equipped_badge_id === badge.id;
-              return (
-                <button
-                  key={badge.id}
-                  onClick={() => handleEquipBadge(badge.id)}
-                  disabled={isEquipping}
-                  className={`relative flex flex-col items-center justify-center p-2.5 rounded-xl transition-all duration-200 active:scale-95 ${
-                    isEquipped 
-                      ? 'bg-amber-500/10 border-2 border-amber-400 shadow-md shadow-amber-500/5' 
-                      : 'bg-black/20 border border-white/5 hover:border-white/10'
-                  }`}
-                >
-                  {/* PNG Container Layout (Removes Black BG instantly via mix-blend-screen + custom shimmer) */}
-                  <div className={`w-12 h-12 mb-1 flex items-center justify-center rounded-lg ${shimmerTailwindClasses}`}>
-                    <img 
-                      src={badge.imageUrl} 
-                      alt={badge.name} 
-                      className="w-full h-full object-contain mix-blend-screen scale-110"
-                    />
-                  </div>
+          <div className="bg-white/5 border border-white/5 rounded-2xl p-4 shadow-md backdrop-blur-md">
+            {earnedBadges.length === 0 ? (
+              <div className="text-center py-6 text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                No badges earned yet. Hit the links.
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-3">
+                {earnedBadges.map((badge) => {
+                  const isEquipped = player.equipped_badge_id === badge.id;
+                  const isSpinning = !!spinningBadges[badge.id];
 
-                  <span className="text-[9px] font-black tracking-tight text-slate-300 text-center line-clamp-1 w-full">
-                    {badge.name}
-                  </span>
+                  return (
+                    <button
+                      key={badge.id}
+                      onClick={() => handleBadgeInteraction(badge.id)}
+                      className={`relative flex flex-col items-center justify-center p-2.5 rounded-xl transition-all duration-200 ${
+                        isEquipped 
+                          ? 'bg-amber-500/10 border-2 border-amber-400 shadow-md' 
+                          : 'bg-black/20 border border-white/5 hover:border-white/10 active:scale-95'
+                      }`}
+                    >
+                      {/* PNG Badge Container */}
+                      <div className={`w-12 h-12 mb-1 flex items-center justify-center rounded-lg [transform-style:preserve-3d] transition-transform duration-500 ease-out ${shimmerTailwindClasses} ${isSpinning ? '[transform:rotateY(360deg)]' : ''}`}>
+                        <img 
+                          src={badge.imageAsset} 
+                          alt={badge.name} 
+                          className="w-full h-full object-contain mix-blend-screen scale-110 select-none pointer-events-none"
+                        />
+                      </div>
 
-                  {/* Equipped Micro-Indicator */}
-                  {isEquipped && (
-                    <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+                      <span className="text-[9px] font-black tracking-tight text-slate-300 text-center line-clamp-1 w-full select-none">
+                        {badge.name}
+                      </span>
+
+                      {/* Micro Indicators */}
+                      {isEquipped && (
+                        <span className="absolute -top-1 -right-1 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </section>
 

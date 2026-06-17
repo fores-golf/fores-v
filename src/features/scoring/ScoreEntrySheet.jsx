@@ -143,17 +143,18 @@ export default function ScoreEntrySheet({ isOpen, onClose, currentHole, par, onS
         </div>
 
         {/* Action Button Strip */}
-        <div className="p-4 px-5 bg-slate-950 border-t border-slate-800/60 shrink-0 flex gap-3">
-          <button 
-            onClick={() => {
-              onSave({ score, putts, accuracy, penalties, water, drinks });
-              onClose();
-            }}
-            className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-widest py-4 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all border border-emerald-500"
-          >
-            Confirm & Lock Score
-          </button>
-        </div>
+<div className="p-4 px-5 bg-slate-950 border-t border-slate-800/60 shrink-0 flex gap-3">
+  <button 
+    onClick={() => {
+      // 🎯 Added 'par' explicitly to the payload object
+      onSave({ score, putts, accuracy, penalties, water, drinks, par }); 
+      onClose();
+    }}
+    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs uppercase tracking-widest py-4 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.3)] transition-all border border-emerald-500"
+  >
+    Confirm & Lock Score
+  </button>
+</div>
 
       </div>
     </>
