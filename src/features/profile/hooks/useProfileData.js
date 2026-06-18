@@ -48,7 +48,7 @@ export function useProfileData() {
         const { data, error } = await supabase
           .from('players')
           .select('*')
-          .eq('auth_id', user.id) // FIXED: Now matches on auth_id
+          .eq('auth_id', user.id)
           .single();
 
         if (error && error.code !== 'PGRST116') throw error;
@@ -104,13 +104,19 @@ export function useProfileData() {
       if (profileUpdateData.equipped_badge_id !== undefined) payload.equipped_badge_id = profileUpdateData.equipped_badge_id;
       if (profileUpdateData.unlocked_badges !== undefined) payload.unlocked_badges = profileUpdateData.unlocked_badges;
 
-      // FIXED: Safely update using auth_id
-      const { error } = await supabase
+      // 🎯 FIXED: Appended .select() so we can verify the row actually updated
+      const { data, error } = await supabase
         .from('players')
         .update(payload)
-        .eq('auth_id', user.id);
+        .eq('auth_id', user.id)
+        .select();
 
       if (error) throw error;
+      
+      // 🎯 FIXED: Catch silent RLS failures and throw a real error
+      if (!data || data.length === 0) {
+        throw new Error("0 rows updated. Your Row Level Security (RLS) policy is blocking the save. Please update your Supabase UPDATE policy to: auth_id = auth.uid()");
+      }
       
       setProfile(prev => ({ ...prev, ...payload }));
       return { success: true };
@@ -146,7 +152,8 @@ export function useProfileData() {
         .getPublicUrl(filePath);
 
       // Save URL to DB instantly
-      await updateProfile({ avatar_url: publicUrl });
+      const { success, error } = await updateProfile({ avatar_url: publicUrl });
+      if (!success) throw new Error(error);
       
       return { success: true };
     } catch (error) {
