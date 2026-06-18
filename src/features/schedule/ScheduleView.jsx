@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useScheduleData } from './hooks/useScheduleData';
 import { useUser } from '../../context/UserContext';
 import { supabase } from '../../config/supabaseClient';
+// Adjust this import path based on where your probability engine file is located relative to this file
+import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
 export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   const { player, isAdmin } = useUser();
@@ -14,7 +16,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   
   // New Match Form State
   const [selectedRound, setSelectedRound] = useState('1');
-  const [matchFormat, setMatchFormat] = useState('1v1'); // Updated variable name for clarity
+  const [matchFormat, setMatchFormat] = useState('1v1');
   const [teeTime, setTeeTime] = useState(''); 
   const [t1p1, setT1p1] = useState('');
   const [t1p2, setT1p2] = useState('');
@@ -48,7 +50,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
       const { error } = await supabase.from('matches').insert({
         round: parseInt(selectedRound),
         match_number: nextMatchNumber,
-        format: matchFormat, // Changed from game_type to match the db column "format"
+        format: matchFormat,
         tee_time: teeTime, 
         team1_player1: t1p1,
         team1_player2: t1p2 || null,
@@ -74,7 +76,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     }
   };
 
-  // Helper function to format database "HH:MM:SS" time into premium readable AM/PM format
   const formatDisplayTime = (timeStr) => {
     if (!timeStr) return 'TBD';
     const [hours, minutes] = timeStr.split(':');
@@ -82,6 +83,26 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     const ampm = hourInt >= 12 ? 'PM' : 'AM';
     const displayHour = hourInt % 12 || 12;
     return `${displayHour}:${minutes} ${ampm}`;
+  };
+
+  // --- BULLETPROOF ID TRANSLATION ---
+  const getGolferName = (identifier) => {
+    if (!identifier) return null;
+    
+    // Defensive catch: If Supabase auto-joined the profile object, grab the name directly
+    if (typeof identifier === 'object' && identifier.name) {
+      return identifier.name;
+    }
+
+    // Aggressively normalize the string to avoid case or whitespace mismatches
+    const safeIdentifier = String(identifier).trim().toLowerCase();
+    
+    const found = golfers.find(g => 
+      String(g.id).trim().toLowerCase() === safeIdentifier || 
+      String(g.name).trim().toLowerCase() === safeIdentifier
+    );
+    
+    return found ? found.name : identifier; 
   };
 
   // Filter matches for the active round, then sort them chronologically by tee_time
@@ -177,11 +198,11 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                   <span className="text-[9px] font-black uppercase text-blue-400 block tracking-widest">Slanted Clams</span>
                   <select value={t1p1} onChange={(e) => setT1p1(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-blue-500/50">
                     <option value="">Lead Player...</option>
-                    {team1Options.map(g => <option key={g.id} value={g.name} className="bg-[#0f172a]">{g.name}</option>)}
+                    {team1Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
                   </select>
                   <select value={t1p2} onChange={(e) => setT1p2(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-400 font-bold focus:outline-none focus:border-blue-500/50">
                     <option value="">Partner (Optional)...</option>
-                    {team1Options.map(g => <option key={g.id} value={g.name} className="bg-[#0f172a]">{g.name}</option>)}
+                    {team1Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
                   </select>
                 </div>
 
@@ -190,11 +211,11 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                   <span className="text-[9px] font-black uppercase text-red-400 block tracking-widest">Clam Brothelmen</span>
                   <select value={t2p1} onChange={(e) => setT2p1(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-red-500/50">
                     <option value="">Lead Player...</option>
-                    {team2Options.map(g => <option key={g.id} value={g.name} className="bg-[#0f172a]">{g.name}</option>)}
+                    {team2Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
                   </select>
                   <select value={t2p2} onChange={(e) => setT2p2(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-400 font-bold focus:outline-none focus:border-red-500/50">
                     <option value="">Partner (Optional)...</option>
-                    {team2Options.map(g => <option key={g.id} value={g.name} className="bg-[#0f172a]">{g.name}</option>)}
+                    {team2Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
                   </select>
                 </div>
 
@@ -239,11 +260,21 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
           </div>
         ) : (
           displayedMatches.map((match) => {
-            const isMyMatch = 
-              match.team1_player1 === player?.name ||
-              match.team1_player2 === player?.name ||
-              match.team2_player1 === player?.name ||
-              match.team2_player2 === player?.name;
+            
+            // --- BULLETPROOF AUTH CHECK ---
+            const safePlayerId = player?.id ? String(player.id).trim().toLowerCase() : null;
+            const safePlayerName = player?.name ? String(player.name).trim().toLowerCase() : null;
+            
+            const matchParticipants = [
+              match.team1_player1, match.team1_player2,
+              match.team2_player1, match.team2_player2
+            ].filter(Boolean).map(p => {
+              // Defensive catch for nested objects
+              const val = typeof p === 'object' ? (p.id || p.name) : p;
+              return String(val).trim().toLowerCase();
+            });
+
+            const isMyMatch = matchParticipants.some(p => p === safePlayerId || p === safePlayerName);
 
             return (
               <div 
@@ -254,7 +285,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
               >
                 {isMyMatch && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#34d399] to-emerald-600"></div>}
 
-                {/* Card Header displays match format and custom sorted tee times */}
+                {/* Card Header */}
                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-500">
                   <div className="flex items-center gap-1.5">
                     <span>{match.format || '1v1'}</span>
@@ -273,16 +304,24 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                 <div className="grid grid-cols-2 gap-4 items-center bg-black/20 p-3 rounded-xl border border-white/5">
                   <div className="space-y-1">
                     <span className="text-[9px] font-black uppercase tracking-wider text-blue-400">Slanted Clams</span>
-                    <div className="text-sm font-black tracking-tight truncate">{match.team1_player1}</div>
-                    <div className="text-sm font-black tracking-tight truncate text-slate-400">{match.team1_player2 || 'Single Solo'}</div>
+                    <div className="text-sm font-black tracking-tight truncate">{getGolferName(match.team1_player1)}</div>
+                    <div className="text-sm font-black tracking-tight truncate text-slate-400">{getGolferName(match.team1_player2) || 'Single Solo'}</div>
                   </div>
 
                   <div className="space-y-1 text-right border-l border-white/5 pl-4">
                     <span className="text-[9px] font-black uppercase tracking-wider text-red-400">Clam Brothelmen</span>
-                    <div className="text-sm font-black tracking-tight truncate">{match.team2_player1}</div>
-                    <div className="text-sm font-black tracking-tight truncate text-slate-400">{match.team2_player2 || 'Single Solo'}</div>
+                    <div className="text-sm font-black tracking-tight truncate">{getGolferName(match.team2_player1)}</div>
+                    <div className="text-sm font-black tracking-tight truncate text-slate-400">{getGolferName(match.team2_player2) || 'Single Solo'}</div>
                   </div>
                 </div>
+
+                {/* PROBABILITY ENGINE */}
+                <MatchProbabilityBar 
+                  matchId={match.id} 
+                  status={match.status} 
+                  team1Name={getGolferName(match.team1_player1)}
+                  team2Name={getGolferName(match.team2_player1)}
+                />
 
                 <div className="flex justify-between items-center border-t border-white/5 pt-3 mt-1">
                   <div className="flex flex-col">

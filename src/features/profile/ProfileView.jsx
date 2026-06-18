@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
+import { useProfileData, parseBadges } from './hooks/useProfileData';
 
 // --- DIRECT ASSET IMPORTS ---
 import dkImg from '/assets/badges/dk.png';
@@ -26,12 +27,10 @@ const AVAILABLE_BADGES = [
 ];
 
 export default function ProfileView({ onBack }) {
-  const { player, logout, refreshIdentity } = useUser();
+  const { logout, refreshIdentity } = useUser(); // Kept for global sync and logout
+  const { profile, loading, updating, updateProfile, uploadAvatar } = useProfileData();
   
   const [isEditing, setIsEditing] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [isEquipping, setIsEquipping] = useState(false);
   const [isCheckingBadges, setIsCheckingBadges] = useState(false);
   
   // Animation states
@@ -39,46 +38,59 @@ export default function ProfileView({ onBack }) {
   const [mainPinSpinning, setMainPinSpinning] = useState(false);
   
   const lastTapRef = useRef({ id: null, time: 0 });
-
-  // Local form state
-  const [formData, setFormData] = useState({
-    name: player?.name || '',
-    archetype: player?.archetype || 'All-Around',
-    driving_dist: player?.driving_dist || '',
-    gir_percentage: player?.gir_percentage || '',
-    avg_putts: player?.avg_putts || '',
-    power_rating: player?.power_rating || '',
-    short_game_rating: player?.short_game_rating || ''
-  });
-
   const fileInputRef = useRef(null);
 
+  const [formData, setFormData] = useState({
+    name: '',
+    archetype: 'All-Around',
+    driving_dist: '',
+    gir_percentage: '',
+    avg_putts: '',
+    power_rating: '',
+    short_game_rating: ''
+  });
+
+  // Initialize local state from the hook's profile when entering Edit Mode.
   useEffect(() => {
-    if (player?.id) {
+    if (profile && isEditing) {
+      setFormData({
+        name: profile.name || '',
+        archetype: profile.archetype || 'All-Around',
+        driving_dist: profile.driving_dist ?? '',
+        gir_percentage: profile.gir_percentage ?? '',
+        avg_putts: profile.avg_putts ?? '',
+        power_rating: profile.power_rating ?? '',
+        short_game_rating: profile.short_game_rating ?? ''
+      });
+    }
+  }, [profile, isEditing]);
+
+  // Handle badge checking safely
+  useEffect(() => {
+    if (profile?.id) {
       checkAndAwardBadges();
     }
-  }, [player?.id]);
+  }, [profile?.id]);
 
-  if (!player) return null;
+  if (loading || !profile?.id) return null;
 
-  const isClams = player.team === 'Slanted Clams';
-  const currentBadge = AVAILABLE_BADGES.find(b => b.id === player.equipped_badge_id);
-  const unlockedBadgeIds = player.unlocked_badges || []; 
+  const isClams = profile.team === 'Slanted Clams';
+  const currentBadge = AVAILABLE_BADGES.find(b => b.id === profile.equipped_badge_id);
+  const unlockedBadgeIds = profile.unlocked_badges || []; 
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  // --- STREAK CALCULATION ENGINE (UPDATED FOR DIRECT PAR COLUMN) ---
+  // --- STREAK CALCULATION ENGINE ---
   const checkAndAwardBadges = async () => {
     try {
       setIsCheckingBadges(true);
       
-      // Pull gross_score and par directly from the flat hole_scores table
       const { data: scores, error } = await supabase
         .from('hole_scores')
-        .select('gross_score, par, updated_at')
-        .eq('profile_id', player.id)
+        .select(`gross_score, updated_at, holes (par)`)
+        .eq('player_id', profile.id)
         .order('updated_at', { ascending: true });
 
       if (error) throw error;
@@ -87,17 +99,15 @@ export default function ProfileView({ onBack }) {
       let maxStreak = 0;
       let currentStreak = 0;
 
-      scores.forEach((hole) => {
-        const grossScore = hole.gross_score;
-        const targetPar = hole.par;
+      scores.forEach((scoreRecord) => {
+        const grossScore = scoreRecord.gross_score;
+        const targetPar = scoreRecord.holes?.par;
 
         if (grossScore !== null && targetPar !== undefined && targetPar !== null && grossScore <= targetPar) {
           currentStreak++;
-          if (currentStreak > maxStreak) {
-            maxStreak = currentStreak;
-          }
+          if (currentStreak > maxStreak) maxStreak = currentStreak;
         } else {
-          currentStreak = 0; // Streak broken, resets but retains max
+          currentStreak = 0; 
         }
       });
 
@@ -106,14 +116,10 @@ export default function ProfileView({ onBack }) {
       }).map(b => b.id);
 
       if (badgesToUnlock.length > 0) {
-        const updatedUnlockedList = [...unlockedBadgeIds, ...badgesToUnlock];
+        // FIXED: Using Set to ensure no duplicates after safe array parsing
+        const updatedUnlockedList = [...new Set([...unlockedBadgeIds, ...badgesToUnlock])];
         
-        const { error: patchError } = await supabase
-          .from('profiles')
-          .update({ unlocked_badges: updatedUnlockedList })
-          .eq('id', player.id);
-
-        if (patchError) throw patchError;
+        await updateProfile({ unlocked_badges: updatedUnlockedList });
         await refreshIdentity();
       }
     } catch (err) {
@@ -123,7 +129,7 @@ export default function ProfileView({ onBack }) {
     }
   };
 
-  // --- DUAL INTERACTION HANDLER (TAP TO EQUIP / DOUBLE TAP TO SPIN) ---
+  // --- DUAL INTERACTION HANDLER ---
   const handleBadgeInteraction = (badgeId) => {
     if (!unlockedBadgeIds.includes(badgeId)) return;
 
@@ -150,22 +156,13 @@ export default function ProfileView({ onBack }) {
   };
 
   const executeEquipBadge = async (badgeId) => {
-    if (isEquipping) return;
-    setIsEquipping(true);
+    if (updating) return;
     try {
-      const nextBadgeId = player.equipped_badge_id === badgeId ? null : badgeId;
-
-      const { error } = await supabase
-        .from('profiles')
-        .update({ equipped_badge_id: nextBadgeId })
-        .eq('id', player.id);
-
-      if (error) throw error;
+      const nextBadgeId = profile.equipped_badge_id === badgeId ? null : badgeId;
+      await updateProfile({ equipped_badge_id: nextBadgeId });
       await refreshIdentity();
     } catch (error) {
       alert('Error equipping badge: ' + error.message);
-    } finally {
-      setIsEquipping(false);
     }
   };
 
@@ -177,70 +174,26 @@ export default function ProfileView({ onBack }) {
 
   // --- IMAGE UPLOAD ENGINE ---
   const handleImageUpload = async (e) => {
-    try {
-      if (!e.target.files || e.target.files.length === 0) return;
-      setIsUploading(true);
-      
-      const file = e.target.files[0];
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${player.id}/avatar_${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(filePath, file, { upsert: true });
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(filePath);
-
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ avatar_url: publicUrl })
-        .eq('id', player.id);
-
-      if (updateError) throw updateError;
-      await refreshIdentity();
-    } catch (error) {
-      alert('Error uploading image: ' + error.message);
-    } finally {
-      setIsUploading(false);
+    const { success, error } = await uploadAvatar(e);
+    if (success) {
+      await refreshIdentity(); // Sync global app state
+    } else {
+      alert('Error uploading image: ' + error);
     }
   };
 
   // --- TEXT DATA SAVE ENGINE ---
   const handleSaveProfile = async () => {
-    setIsSaving(true);
-    try {
-      const payload = {
-        name: formData.name,
-        archetype: formData.archetype,
-        driving_dist: parseInt(formData.driving_dist) || null,
-        gir_percentage: parseInt(formData.gir_percentage) || null,
-        avg_putts: parseFloat(formData.avg_putts) || null,
-        power_rating: parseInt(formData.power_rating) || null,
-        short_game_rating: parseInt(formData.short_game_rating) || null
-      };
-
-      const { error } = await supabase
-        .from('profiles')
-        .update(payload)
-        .eq('id', player.id);
-
-      if (error) throw error;
-      await refreshIdentity();
+    const { success, error } = await updateProfile(formData);
+    if (success) {
+      await refreshIdentity(); // Sync global app state
       setIsEditing(false);
-    } catch (error) {
-      alert('Error saving profile: ' + error.message);
-    } finally {
-      setIsSaving(false);
+    } else {
+      alert('Error saving profile data: ' + error);
     }
   };
 
   const shimmerTailwindClasses = "relative overflow-hidden after:absolute after:inset-0 after:w-[200%] after:-translate-x-full after:animate-[shimmer_2.5s_infinite_linear] after:bg-gradient-to-r after:from-transparent after:via-white/40 after:to-transparent";
-
-  // Filter available badges so only earned ones render
   const earnedBadges = AVAILABLE_BADGES.filter(badge => unlockedBadgeIds.includes(badge.id));
 
   return (
@@ -256,8 +209,8 @@ export default function ProfileView({ onBack }) {
           Tour Card
         </h1>
         {isEditing ? (
-          <button onClick={handleSaveProfile} disabled={isSaving} className="text-xs font-black text-[#34d399] uppercase tracking-wider active:scale-95 transition-transform">
-            {isSaving ? 'Saving...' : 'Save'}
+          <button onClick={handleSaveProfile} disabled={updating} className="text-xs font-black text-[#34d399] uppercase tracking-wider active:scale-95 transition-transform">
+            {updating ? 'Saving...' : 'Save'}
           </button>
         ) : (
           <button onClick={() => setIsEditing(true)} className="text-xs font-black text-amber-500 uppercase tracking-wider active:scale-95 transition-transform flex items-center gap-1">
@@ -273,47 +226,29 @@ export default function ProfileView({ onBack }) {
           
           <div className="flex flex-col items-center mb-6 relative z-10 text-center">
             
-            {/* --- AVATAR SECTOR WITH LIVE OVERLAY --- */}
+            {/* --- AVATAR SECTOR --- */}
             <div className="relative mb-4">
-              <div 
-                className="relative group cursor-pointer" 
-                onClick={() => fileInputRef.current?.click()}
-              >
+              <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                 <div className={`w-24 h-24 rounded-full border-4 ${isClams ? 'border-blue-500/50' : 'border-red-500/50'} overflow-hidden bg-black/50 flex items-center justify-center relative shadow-xl`}>
-                  {isUploading ? (
+                  {updating ? (
                     <span className="animate-spin h-8 w-8 border-4 border-white border-t-transparent rounded-full" />
-                  ) : player.avatar_url ? (
-                    <img src={player.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                  ) : profile.avatar_url ? (
+                    <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-3xl font-black text-slate-600">{player.name.charAt(0)}</span>
+                    <span className="text-3xl font-black text-slate-600">{profile.name?.charAt(0) || '?'}</span>
                   )}
                   
                   <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                     <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                   </div>
                 </div>
-                <input 
-                  type="file" 
-                  ref={fileInputRef} 
-                  onChange={handleImageUpload} 
-                  accept="image/*" 
-                  className="hidden" 
-                />
+                <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
               </div>
 
               {/* LIVE EQUIPPED PIN */}
               {currentBadge && (
-                <button 
-                  onClick={triggerMainPinSpin}
-                  className={`absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#090d16] border-2 border-amber-400 flex items-center justify-center p-0.5 shadow-lg [transform-style:preserve-3d] transition-transform duration-500 ease-out ${shimmerTailwindClasses} ${
-                    mainPinSpinning ? '[transform:rotateY(360deg)]' : ''
-                  }`}
-                >
-                  <img 
-                    src={currentBadge.imageAsset} 
-                    alt={currentBadge.name} 
-                    className="w-full h-full object-contain mix-blend-screen scale-110"
-                  />
+                <button onClick={triggerMainPinSpin} className={`absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#090d16] border-2 border-amber-400 flex items-center justify-center p-0.5 shadow-lg [transform-style:preserve-3d] transition-transform duration-500 ease-out ${shimmerTailwindClasses} ${mainPinSpinning ? '[transform:rotateY(360deg)]' : ''}`}>
+                  <img src={currentBadge.imageAsset} alt={currentBadge.name} className="w-full h-full object-contain mix-blend-screen scale-110" />
                 </button>
               )}
             </div>
@@ -321,28 +256,18 @@ export default function ProfileView({ onBack }) {
             {/* --- NAME & ARCHETYPE --- */}
             {isEditing ? (
               <div className="flex flex-col gap-2 w-full px-4">
-                <input 
-                  type="text" 
-                  value={formData.name} 
-                  onChange={(e) => handleInputChange('name', e.target.value)}
-                  className="bg-black/50 border border-white/10 rounded-xl p-2 text-center text-xl font-black text-white focus:outline-none focus:border-white/30"
-                />
-                <input 
-                  type="text" 
-                  value={formData.archetype} 
-                  onChange={(e) => handleInputChange('archetype', e.target.value)}
-                  className="bg-black/50 border border-white/10 rounded-xl p-2 text-center text-xs font-bold text-slate-300 focus:outline-none focus:border-white/30 uppercase tracking-widest"
-                />
+                <input type="text" value={formData.name} onChange={(e) => handleInputChange('name', e.target.value)} className="bg-black/50 border border-white/10 rounded-xl p-2 text-center text-xl font-black text-white focus:outline-none focus:border-white/30" />
+                <input type="text" value={formData.archetype} onChange={(e) => handleInputChange('archetype', e.target.value)} className="bg-black/50 border border-white/10 rounded-xl p-2 text-center text-xs font-bold text-slate-300 focus:outline-none focus:border-white/30 uppercase tracking-widest" />
               </div>
             ) : (
               <>
-                <h2 className="text-3xl font-black tracking-tighter uppercase italic drop-shadow-md">{player.name}</h2>
+                <h2 className="text-3xl font-black tracking-tighter uppercase italic drop-shadow-md">{profile.name}</h2>
                 <div className="flex justify-center items-center gap-2 mt-1">
                   <span className={`text-[10px] font-black uppercase tracking-[0.2em] px-2 py-0.5 rounded-full ${isClams ? 'bg-blue-500/20 text-blue-400' : 'bg-red-500/20 text-red-400'}`}>
-                    {player.team}
+                    {profile.team || 'Unsigned'}
                   </span>
                   <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 bg-black/30 px-2 py-0.5 rounded-full border border-white/5">
-                    {player.archetype || 'All-Around'}
+                    {profile.archetype || 'All-Around'}
                   </span>
                 </div>
               </>
@@ -353,7 +278,7 @@ export default function ProfileView({ onBack }) {
           <div className="flex justify-center border-t border-white/5 pt-4 mt-2">
             <div className="text-center">
               <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 block mb-1">Index</span>
-              <span className={`text-4xl font-black tabular-nums tracking-tighter ${isClams ? 'text-blue-400' : 'text-red-400'}`}>{player.handicap}</span>
+              <span className={`text-4xl font-black tabular-nums tracking-tighter ${isClams ? 'text-blue-400' : 'text-red-400'}`}>{profile.handicap}</span>
             </div>
           </div>
         </div>
@@ -375,7 +300,7 @@ export default function ProfileView({ onBack }) {
             ) : (
               <div className="grid grid-cols-4 gap-3">
                 {earnedBadges.map((badge) => {
-                  const isEquipped = player.equipped_badge_id === badge.id;
+                  const isEquipped = profile.equipped_badge_id === badge.id;
                   const isSpinning = !!spinningBadges[badge.id];
 
                   return (
@@ -383,25 +308,13 @@ export default function ProfileView({ onBack }) {
                       key={badge.id}
                       onClick={() => handleBadgeInteraction(badge.id)}
                       className={`relative flex flex-col items-center justify-center p-2.5 rounded-xl transition-all duration-200 ${
-                        isEquipped 
-                          ? 'bg-amber-500/10 border-2 border-amber-400 shadow-md' 
-                          : 'bg-black/20 border border-white/5 hover:border-white/10 active:scale-95'
+                        isEquipped ? 'bg-amber-500/10 border-2 border-amber-400 shadow-md' : 'bg-black/20 border border-white/5 hover:border-white/10 active:scale-95'
                       }`}
                     >
-                      {/* PNG Badge Container */}
                       <div className={`w-12 h-12 mb-1 flex items-center justify-center rounded-lg [transform-style:preserve-3d] transition-transform duration-500 ease-out ${shimmerTailwindClasses} ${isSpinning ? '[transform:rotateY(360deg)]' : ''}`}>
-                        <img 
-                          src={badge.imageAsset} 
-                          alt={badge.name} 
-                          className="w-full h-full object-contain mix-blend-screen scale-110 select-none pointer-events-none"
-                        />
+                        <img src={badge.imageAsset} alt={badge.name} className="w-full h-full object-contain mix-blend-screen scale-110 select-none pointer-events-none" />
                       </div>
-
-                      <span className="text-[9px] font-black tracking-tight text-slate-300 text-center line-clamp-1 w-full select-none">
-                        {badge.name}
-                      </span>
-
-                      {/* Micro Indicators */}
+                      <span className="text-[9px] font-black tracking-tight text-slate-300 text-center line-clamp-1 w-full select-none">{badge.name}</span>
                       {isEquipped && (
                         <span className="absolute -top-1 -right-1 flex h-2 w-2">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -432,7 +345,7 @@ export default function ProfileView({ onBack }) {
                   <span className="text-[10px] font-bold text-slate-500">YDS</span>
                 </div>
               ) : (
-                <span className="text-sm font-black tabular-nums text-white">{player.driving_dist ? `${player.driving_dist} YDS` : '--'}</span>
+                <span className="text-sm font-black tabular-nums text-white">{profile.driving_dist ? `${profile.driving_dist} YDS` : '--'}</span>
               )}
             </div>
             
@@ -445,7 +358,7 @@ export default function ProfileView({ onBack }) {
                   <span className="text-[10px] font-bold text-slate-500">%</span>
                 </div>
               ) : (
-                <span className="text-sm font-black tabular-nums text-white">{player.gir_percentage ? `${player.gir_percentage}%` : '--'}</span>
+                <span className="text-sm font-black tabular-nums text-white">{profile.gir_percentage ? `${profile.gir_percentage}%` : '--'}</span>
               )}
             </div>
             
@@ -455,7 +368,7 @@ export default function ProfileView({ onBack }) {
               {isEditing ? (
                 <input type="number" step="0.1" value={formData.avg_putts} onChange={(e) => handleInputChange('avg_putts', e.target.value)} className="bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-right font-black text-white focus:outline-none text-sm tabular-nums w-20" />
               ) : (
-                <span className="text-sm font-black tabular-nums text-white">{player.avg_putts || '--'}</span>
+                <span className="text-sm font-black tabular-nums text-white">{profile.avg_putts || '--'}</span>
               )}
             </div>
 
@@ -465,7 +378,7 @@ export default function ProfileView({ onBack }) {
               {isEditing ? (
                 <input type="number" value={formData.power_rating} onChange={(e) => handleInputChange('power_rating', e.target.value)} className="bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-right font-black text-white focus:outline-none text-sm tabular-nums w-20" />
               ) : (
-                <span className="text-sm font-black tabular-nums text-amber-400">{player.power_rating || '--'}</span>
+                <span className="text-sm font-black tabular-nums text-amber-400">{profile.power_rating || '--'}</span>
               )}
             </div>
 
@@ -475,10 +388,9 @@ export default function ProfileView({ onBack }) {
               {isEditing ? (
                 <input type="number" value={formData.short_game_rating} onChange={(e) => handleInputChange('short_game_rating', e.target.value)} className="bg-black/30 border border-white/10 rounded-lg px-2 py-1.5 text-right font-black text-white focus:outline-none text-sm tabular-nums w-20" />
               ) : (
-                <span className="text-sm font-black tabular-nums text-amber-400">{player.short_game_rating || '--'}</span>
+                <span className="text-sm font-black tabular-nums text-amber-400">{profile.short_game_rating || '--'}</span>
               )}
             </div>
-
           </div>
         </section>
 

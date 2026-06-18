@@ -1,5 +1,7 @@
 import React from 'react';
 import { useLeaderboardData } from './hooks/useLeaderboardData';
+// Adjust this import path based on where your probability engine file is located
+import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
 export default function LeaderboardView({ onBack }) {
   const { standings, matchHistory, loading } = useLeaderboardData();
@@ -118,6 +120,14 @@ export default function LeaderboardView({ onBack }) {
                       {match.team2_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team2_player2}</span>}
                     </div>
                   </div>
+
+                  {/* --- INJECTED PROBABILITY ENGINE --- */}
+                  <MatchProbabilityBar 
+                    matchId={match.id} 
+                    status={match.status} 
+                    team1Name={match.team1_player1}
+                    team2Name={match.team2_player1}
+                  />
 
                 </div>
               ))

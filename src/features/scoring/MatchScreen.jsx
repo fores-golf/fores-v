@@ -18,11 +18,8 @@ export default function MatchScreen({ matchId, onBack }) {
   const [isMintingActive, setIsMintingActive] = useState(false);
   const [currentScoreData, setCurrentScoreData] = useState(null);
 
-  const [matchInsights, setMatchInsights] = useState({
-    status: "ALL SQUARE",
-    thru: "Hole 1",
-    wagerStatus: "LIVE"
-  });
+  // 1. DUMMY DATA REMOVED. Starts empty.
+  const [matchInsights, setMatchInsights] = useState({});
 
   useEffect(() => {
     async function fetchHole() {
@@ -99,15 +96,29 @@ export default function MatchScreen({ matchId, onBack }) {
       try {
         const { data, error } = await supabase
           .from('matches')
-          .select('team1_score, team2_score, format')
+          .select(`
+            team1_score, 
+            team2_score, 
+            format,
+            team1_playing_handicap,
+            team2_playing_handicap,
+            team1_player1,
+            team2_player1
+          `)
           .eq('id', matchId)
           .single();
 
         if (!error && data) {
+          // 2. LIVE DATA INJECTED. Adding matchId so the probability engine can grab it.
           setMatchInsights({
-            status: `${data.team1_score} vs ${data.team2_score}`,
+            matchupId: matchId, // CRITICAL: This is what PremiumMapMatrix expects
+            status: `${data.team1_score || 0} vs ${data.team2_score || 0}`,
             thru: `Hole ${currentHole}`,
-            wagerStatus: (data.format || 'LIVE').toUpperCase()
+            wagerStatus: (data.format || 'LIVE').toUpperCase(),
+            team1Handicap: data.team1_playing_handicap,
+            team2Handicap: data.team2_playing_handicap,
+            team1Name: data.team1_player1,
+            team2Name: data.team2_player1
           });
         }
       } catch (err) {
@@ -158,15 +169,15 @@ export default function MatchScreen({ matchId, onBack }) {
     // --- ASYNCHRONOUS TARGETED CARD PROTOCOL CHECKS ---
     let matchedCardConfig = null;
 
-    // 1. OceanGate Validation (2+ water balls on single hole)
+    // 1. OceanGate Validation
     matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
     
-    // 2. Whammy Validation (+2 double bogey or worse on holes 9 AND 11 in same round)
+    // 2. Whammy Validation
     if (!matchedCardConfig) {
       matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
     }
 
-    // 3. Banquet Birdie Validation (First gets 1/1, next 4 get /5, next 5 get /10)
+    // 3. Banquet Birdie Validation
     if (!matchedCardConfig) {
       matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
     }

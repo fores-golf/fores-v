@@ -7,6 +7,7 @@ import { useUser } from '../../context/UserContext';
 import { useGeolocation } from '../../shared/hooks/useGeolocation';
 import { useWeather } from '../../shared/hooks/useWeather';
 import { calculateDistanceYards } from '../../shared/utils/geoMath';
+import { MatchProbabilityBar } from '../probability/probability_engine';
 
 // --- VIRTUAL CADDIE PHYSICS ENGINE ---
 function getCaddieAdvice(rawYardage, courseElevFt, homeElevFt, garage) {
@@ -21,6 +22,8 @@ function getCaddieAdvice(rawYardage, courseElevFt, homeElevFt, garage) {
 
   if (garage && garage.length > 0) {
     garage.forEach(item => {
+      if (item.type === 'Putter' || item.distance === 0) return;
+      
       const diff = Math.abs(item.distance - playsLike);
       if (diff < closestDiff) {
         closestDiff = diff;
@@ -67,10 +70,49 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const [shotOrigin, setShotOrigin] = useState(null);
   const [hasInitializedTarget, setHasInitializedTarget] = useState(false);
   const [showProTips, setShowProTips] = useState(false);
+  const [playerGarage, setPlayerGarage] = useState([]);
   
   const { location: userLocation, isTracking, requestLocation } = useGeolocation();
   const mapCenter = holeData?.leafletCenter; 
   const weather = useWeather(mapCenter?.[0], mapCenter?.[1]);
+
+  // Fetch and parse the user's bag_json from the garages table
+  useEffect(() => {
+    const fetchGarageData = async () => {
+      if (!player?.id) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('garages')
+          .select('bag_json')
+          // 🎯 FIXED: Changed query parameter to player_id exclusively
+          .eq('player_id', player.id)
+          .single(); 
+          
+        if (error) throw error;
+        
+        if (data && data.bag_json) {
+          let parsedBag = data.bag_json;
+          if (typeof parsedBag === 'string') {
+            parsedBag = JSON.parse(parsedBag);
+          }
+          
+          if (Array.isArray(parsedBag)) {
+            const mappedClubs = parsedBag.map(club => ({
+              club_name: club.name,
+              distance: Number(club.distance) || 0,
+              type: club.type
+            }));
+            setPlayerGarage(mappedClubs);
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching garage data:", err.message);
+      }
+    };
+
+    fetchGarageData();
+  }, [player?.id]);
 
   useEffect(() => {
     setHasInitializedTarget(false);
@@ -98,15 +140,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const targetToPin = targetPos && mapCenter ? formatYardage(calculateDistanceYards(targetPos[0], targetPos[1], mapCenter[0], mapCenter[1])) : '---';
   const driveDistance = shotOrigin && userLocation ? calculateDistanceYards(shotOrigin[0], shotOrigin[1], userLocation[0], userLocation[1]) : 0;
 
-  const playerGarage = [
-    { club_name: 'Driver', distance: 280 },
-    { club_name: '3 Wood', distance: 250 },
-    { club_name: '4 Iron', distance: 210 },
-    { club_name: '7 Iron', distance: 165 },
-    { club_name: 'Pitching Wedge', distance: 135 },
-    { club_name: 'Sand Wedge', distance: 105 }
-  ];
-  
   const homeElevationFt = 500; 
   const courseElevationFt = holeData?.elevation_green_ft || 1450; 
 
@@ -125,41 +158,36 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}";
 
-
   // --- INTERNAL DATABASE INJECTION ENGINE ---
   const handleInlineSaveScore = async (sheetData) => {
     if (!player || !holeData) return;
 
     try {
-      // 🎯 Direct Mapping: We already have the true holes record sitting in `holeData`
+      // 🎯 FIXED: Completely replaced profile_id with player_id in payload and onConflict constraints
       const dbPayload = {
-        profile_id: player.id,
+        player_id: player.id,
         matchup_id: Number(insights?.matchupId || 7),
         hole_number: Number(holeData.hole_number),
-        hole_id: Number(holeData.id), // Aligns perfectly to the ID in the holes table
+        hole_id: Number(holeData.id),
         gross_score: Number(sheetData.score || 0),
         putts: Number(sheetData.putts || 0),
         accuracy: sheetData.accuracy || '',
         penalty_strokes: Number(sheetData.penalties || 0),
         water_balls: Number(sheetData.water || 0),
         drinks: Number(sheetData.drinks || 0),
-        par: Number(holeData.par) // Pulls the real par right off the holes table data in memory
+        par: Number(holeData.par) 
       };
 
-      console.log("🔥 THE DB PAYLOAD BEING SENT:", dbPayload);
-
-      // Insert/Upsert straight to Supabase
       const { error: saveError } = await supabase
         .from('hole_scores')
-        .upsert(dbPayload, { onConflict: 'profile_id, hole_number, matchup_id' });
+        .upsert(dbPayload, { onConflict: 'player_id, hole_number, matchup_id' });
 
       if (saveError) throw saveError;
 
-      // Scan flat history immediately for new streak milestones
       const { data: scores, error: fetchError } = await supabase
         .from('hole_scores')
         .select('gross_score, par')
-        .eq('profile_id', player.id)
+        .eq('player_id', player.id)
         .order('updated_at', { ascending: true });
 
       if (fetchError) throw fetchError;
@@ -169,7 +197,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
         let currentStreak = 0;
 
         scores.forEach((hole) => {
-          // Extra safety check in JS memory for the streak logic
           if (hole.gross_score !== null && hole.par !== null && hole.gross_score <= hole.par) {
             currentStreak++;
             if (currentStreak > maxStreak) maxStreak = currentStreak;
@@ -190,8 +217,9 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
           .map(tier => tier.id);
 
         if (newUnlocks.length > 0) {
+          // 🎯 FIXED: Changed identifier mapping query to target player_id on the players table
           const { error: patchError } = await supabase
-            .from('profiles')
+            .from('players')
             .update({ unlocked_badges: [...currentlyUnlocked, ...newUnlocks] })
             .eq('id', player.id);
 
@@ -208,10 +236,10 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   };
 
   return (
-    <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in">
+    <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in font-sans">
       
       {/* --- FLOATING LEFT STACK --- */}
-      <div className="absolute top-20 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
+      <div className="absolute top-10 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2 px-3 flex items-center justify-between shadow-lg pointer-events-auto">
           {weather ? (
             <div className="flex items-center gap-2 font-mono text-[10px] font-black w-full justify-between">
@@ -235,7 +263,18 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
              {insights?.status || 'All Square'}
            </div>
            <div className="text-[9px] font-bold text-slate-400 mt-0.5">{insights?.thru || 'Thru 1'}</div>
-           <div className="text-[10px] font-black text-emerald-400 mt-1 border-t border-slate-800 pt-1 flex justify-between items-center">
+
+           {(insights?.matchupId || insights?.matchId) && (
+             <MatchProbabilityBar 
+               matchId={insights?.matchupId || insights?.matchId}
+               status="live" 
+               variant="micro" 
+               team1Name={insights?.team1Name || 'Team 1'}
+               team2Name={insights?.team2Name || 'Team 2'}
+             />
+           )}
+
+           <div className="text-[10px] font-black text-emerald-400 mt-1.5 border-t border-slate-800 pt-1.5 flex justify-between items-center">
              <span className="font-sans text-[7px] text-slate-600 uppercase font-black">Ledger</span>
              <span>{insights?.wagerStatus || 'LIVE'}</span>
            </div>
@@ -243,9 +282,9 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       </div>
 
       {/* --- FLOATING RIGHT STACK --- */}
-      <div className="absolute top-20 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
+      <div className="absolute top-10 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
         <button 
-          onClick={() => onLogScoreClick(handleInlineSaveScore)}
+          onClick={() => onLogScoreClick && onLogScoreClick(handleInlineSaveScore)}
           className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95"
         >
           Log Score
@@ -270,11 +309,11 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       </div>
 
       {/* --- VIRTUAL CADDIE HUD INTERACTIVE OVERLAY --- */}
-      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[400] flex flex-col items-center gap-2 w-full max-w-[290px]">
+      <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-[400] flex flex-col items-center gap-2 w-full max-w-[290px] pointer-events-none">
         {showProTips && holeData?.hole_tips && (
-          <div className="bg-indigo-950/95 backdrop-blur-xl border border-indigo-500/40 p-3 rounded-2xl shadow-2xl text-left animate-slide-up max-w-[280px]">
+          <div className="bg-indigo-950/95 backdrop-blur-xl border border-indigo-500/40 p-3 rounded-2xl shadow-2xl text-left animate-slide-up max-w-[280px] pointer-events-auto">
             <span className="text-[7px] font-black uppercase text-indigo-400 tracking-[0.2em] block mb-1">
-              Giants Ridge Strategy Guide
+              Course Strategy
             </span>
             <p className="text-[10px] text-slate-300 font-medium leading-relaxed font-sans text-justify">
               {holeData.hole_tips}

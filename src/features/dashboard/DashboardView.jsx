@@ -17,7 +17,8 @@ export default function DashboardView({
   isChirpsOpen
 }) {
   const { player } = useUser();
-  const { myMatches, loading, startMatch } = useScheduleData();
+  // We added 'golfers' here so we can translate IDs to names
+  const { myMatches, loading, startMatch, golfers } = useScheduleData();
   const showChirpAlert = useChirpsNotification(isChirpsOpen);
 
   const isClams = player?.team === 'Slanted Clams';
@@ -33,6 +34,13 @@ export default function DashboardView({
     }, 3000);
     return () => clearTimeout(timer);
   }, []);
+
+  // Helper function to map UUID back to Player Name
+  const getPlayerName = (identifier) => {
+    if (!identifier) return "TBD";
+    const found = golfers.find(g => g.id === identifier);
+    return found ? found.name : identifier; // fallback to raw string if not found
+  };
 
   // --- AUTOMATED CALENDAR LOCK: INTROCARD MINT ENGINE ---
   useEffect(() => {
@@ -220,6 +228,10 @@ export default function DashboardView({
             <div className="flex flex-col gap-3">
               {myMatches.map(match => {
                 const isMatchActive = match.is_live === true || match.is_live === 'true' || match.status === 'live';
+                
+                // Translated names for the UI
+                const p1Name = getPlayerName(match.team1_player1);
+                const p2Name = getPlayerName(match.team2_player1);
 
                 return (
                   <div 
@@ -247,7 +259,7 @@ export default function DashboardView({
                     <div className="flex justify-between items-center bg-black/30 p-3 rounded-2xl border border-white/5">
                       <div className="flex flex-col">
                         <span className="text-[9px] font-black uppercase text-blue-400 tracking-wider">Slanted Clams</span>
-                        <span className="text-sm font-black text-slate-200 truncate max-w-[130px]">{match.team1_player1}</span>
+                        <span className="text-sm font-black text-slate-200 truncate max-w-[130px]">{p1Name}</span>
                       </div>
                       
                       <div className="text-center shrink-0 px-2">
@@ -259,7 +271,7 @@ export default function DashboardView({
 
                       <div className="flex flex-col items-end text-right">
                         <span className="text-[9px] font-black uppercase text-red-400 tracking-wider">Brothelmen</span>
-                        <span className="text-sm font-black text-slate-200 truncate max-w-[130px]">{match.team2_player1}</span>
+                        <span className="text-sm font-black text-slate-200 truncate max-w-[130px]">{p2Name}</span>
                       </div>
                     </div>
 

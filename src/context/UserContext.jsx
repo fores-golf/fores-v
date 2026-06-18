@@ -33,12 +33,14 @@ export function UserProvider({ children }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Notice the parameter is 'authId'
   const fetchPlayerProfile = async (authId) => {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('players')
         .select('*')
-        .eq('id', authId)
+        // FIXED: Swapped 'authUserId' to 'authId' to match the parameter
+        .eq('auth_id', authId) 
         .single();
 
       if (error) throw error;

@@ -13,7 +13,7 @@ export function useScheduleData() {
     try {
       setLoading(true);
 
-      // 1. Fetch unconstrained master player list
+      // 1. Fetch unconstrained master player list (Updated to 'players')
       const { data: rosterData, error: rosterError } = await supabase
         .from('players')
         .select('id, name, team')
@@ -32,15 +32,23 @@ export function useScheduleData() {
       if (scheduleError) throw scheduleError;
       setAllMatches(scheduleData || []);
 
-      // 3. Filter "My Matches" dynamically
-      if (player?.name) {
-        const golferName = player.name;
-        const filteredMyMatches = (scheduleData || []).filter(match => 
-          match.team1_player1 === golferName ||
-          match.team1_player2 === golferName ||
-          match.team2_player1 === golferName ||
-          match.team2_player2 === golferName
-        );
+      // 3. Filter "My Matches" dynamically (UPDATED FOR ID MATCHING)
+      if (player) {
+        const safePlayerId = player.id ? String(player.id).trim().toLowerCase() : null;
+        const safePlayerName = player.name ? String(player.name).trim().toLowerCase() : null;
+
+        const filteredMyMatches = (scheduleData || []).filter(match => {
+          const matchParticipants = [
+            match.team1_player1, match.team1_player2,
+            match.team2_player1, match.team2_player2
+          ].filter(Boolean).map(p => {
+            const val = typeof p === 'object' ? (p.id || p.name) : p;
+            return String(val).trim().toLowerCase();
+          });
+
+          return matchParticipants.includes(safePlayerId) || matchParticipants.includes(safePlayerName);
+        });
+        
         setMyMatches(filteredMyMatches);
       }
 
@@ -89,7 +97,7 @@ export function useScheduleData() {
     return () => {
       supabase.removeChannel(matchSubscription);
     };
-  }, [player?.name]);
+  }, [player?.id, player?.name]); // Added player.id to dependencies
 
   return { 
     allMatches, 

@@ -17,10 +17,7 @@ const DEFAULT_BAG = [
 ];
 
 export function useGarageData() {
-  // 1. Grab both player AND session to guarantee we have the master database ID
   const { player, session } = useUser();
-  
-  // 2. Safely extract the definitive Auth UUID
   const activeUserId = session?.user?.id || player?.id;
 
   const [bag, setBag] = useState(DEFAULT_BAG);
@@ -28,44 +25,46 @@ export function useGarageData() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  // --- FETCH EXISTING BAG ON LOAD ---
+  // --- FETCH EXISTING DATA ON LOAD ---
   useEffect(() => {
-    async function fetchGarage() {
-      // Don't run until we have the definitive ID
+    async function fetchGarageData() {
       if (!activeUserId) return;
       
       try {
         setLoading(true);
-        const { data, error } = await supabase
-          .from('garages')
-          .select('*')
-          .eq('profile_id', activeUserId) // Using the safe ID here
-          .maybeSingle();
+        
+        // Fetch from both tables simultaneously for maximum speed
+        const [garageRes, playerRes] = await Promise.all([
+          supabase.from('garages').select('bag_json').eq('profile_id', activeUserId).maybeSingle(),
+          supabase.from('players').select('hometown').eq('auth_id', activeUserId).maybeSingle()
+        ]);
 
-        if (error) throw error;
+        if (garageRes.error) throw garageRes.error;
+        if (playerRes.error) throw playerRes.error;
 
-        if (data) {
-          if (data.hometown) setHometown(data.hometown);
-          
-          if (data.bag_json && Array.isArray(data.bag_json) && data.bag_json.length > 0) {
-            setBag(data.bag_json);
-          } else if (data.bag_json && !Array.isArray(data.bag_json)) {
-            setBag(DEFAULT_BAG);
-          }
+        // 1. Set Hometown from players table
+        if (playerRes.data?.hometown) {
+          setHometown(playerRes.data.hometown);
+        }
+        
+        // 2. Set Bag from garages table
+        if (garageRes.data?.bag_json && Array.isArray(garageRes.data.bag_json) && garageRes.data.bag_json.length > 0) {
+          setBag(garageRes.data.bag_json);
+        } else {
+          setBag(DEFAULT_BAG); // Fallback if no bag exists yet
         }
       } catch (err) {
-        console.error('Error fetching garage:', err.message);
+        console.error('Error fetching garage data:', err.message);
       } finally {
         setLoading(false);
       }
     }
 
-    fetchGarage();
+    fetchGarageData();
   }, [activeUserId]);
 
   // --- SAVE CUSTOM BAG TO DATABASE ---
   const saveGarage = async (currentBag, currentHometown) => {
-    // Failsafe block
     if (!activeUserId) {
       console.error("Missing activeUserId, cannot save.");
       return;
@@ -74,22 +73,36 @@ export function useGarageData() {
     setSaving(true);
     
     try {
-      const payload = {
-        profile_id: activeUserId, // The database will 100% accept this ID
+      // 1. Write the bag data to the 'garages' table
+      const garagePayload = {
+        profile_id: activeUserId,
         bag_json: currentBag,
-        hometown: currentHometown,
         updated_at: new Date()
       };
 
-      const { error } = await supabase
+      const { error: garageError } = await supabase
         .from('garages')
-        .upsert(payload, { onConflict: 'profile_id' });
+        .upsert(garagePayload, { onConflict: 'profile_id' });
 
-      if (error) throw error;
+      if (garageError) throw garageError;
+
+      // 2. Write the player profile data to the 'players' table
+      const playerPayload = {
+        hometown: currentHometown,
+        // (If you need to update 'updated_at' on the players table, uncomment the line below)
+        // updated_at: new Date() 
+      };
+
+      const { error: playerError } = await supabase
+        .from('players')
+        .update(playerPayload)
+        .eq('auth_id', activeUserId);
+
+      if (playerError) throw playerError;
 
     } catch (err) {
-      console.error('Error saving garage:', err.message);
-      alert('Failed to save garage data: ' + err.message);
+      console.error('Error saving data:', err.message);
+      alert('Failed to save data: ' + err.message);
     } finally {
       setSaving(false);
     }
