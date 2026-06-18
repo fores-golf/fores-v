@@ -7,8 +7,12 @@ import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
 
 export default function MatchScreen({ matchId, onBack }) {
+  // 🛑 KILL SWITCH: Set to true to re-enable card minting popups
+  const ENABLE_CARD_MINTING = false;
+
   const { player } = useUser();
   const [currentHole, setCurrentHole] = useState(1);
+  const [isInitializing, setIsInitializing] = useState(true); // <--- Added to prevent double-fetching on load
   const [par, setPar] = useState(4);
   const [activeHoleData, setActiveHoleData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -18,10 +22,49 @@ export default function MatchScreen({ matchId, onBack }) {
   const [isMintingActive, setIsMintingActive] = useState(false);
   const [currentScoreData, setCurrentScoreData] = useState(null);
 
-  // 1. DUMMY DATA REMOVED. Starts empty.
   const [matchInsights, setMatchInsights] = useState({});
 
+  // --- SMART RESUME: Find the first unscored hole on mount ---
   useEffect(() => {
+    async function determineStartingHole() {
+      if (!matchId || !player?.id) {
+        setIsInitializing(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('hole_scores')
+          .select('hole_number')
+          .eq('matchup_id', matchId)
+          .eq('profile_id', player.id);
+
+        if (!error && data && data.length > 0) {
+          const scoredHoles = data.map(d => d.hole_number);
+          let firstUnscored = 1;
+          
+          // Loop up to find the first missing score, capping at 18
+          while (scoredHoles.includes(firstUnscored) && firstUnscored < 18) {
+            firstUnscored++;
+          }
+          
+          setCurrentHole(firstUnscored);
+        }
+      } catch (err) {
+        console.warn('Smart resume failed, defaulting to hole 1:', err.message);
+      } finally {
+        setIsInitializing(false); // Let the app know we found the hole
+      }
+    }
+
+    determineStartingHole();
+  }, [matchId, player?.id]);
+
+  // --- FETCH HOLE DATA ---
+  useEffect(() => {
+    // Don't fetch until the Smart Resume engine figures out which hole we are on
+    if (isInitializing) return;
+
     async function fetchHole() {
       try {
         setIsLoading(true);
@@ -58,7 +101,7 @@ export default function MatchScreen({ matchId, onBack }) {
       }
     }
     fetchHole();
-  }, [currentHole]);
+  }, [currentHole, isInitializing]);
 
   useEffect(() => {
     if (!activeHoleData?.id || !matchId || !player?.id) {
@@ -109,9 +152,8 @@ export default function MatchScreen({ matchId, onBack }) {
           .single();
 
         if (!error && data) {
-          // 2. LIVE DATA INJECTED. Adding matchId so the probability engine can grab it.
           setMatchInsights({
-            matchupId: matchId, // CRITICAL: This is what PremiumMapMatrix expects
+            matchupId: matchId,
             status: `${data.team1_score || 0} vs ${data.team2_score || 0}`,
             thru: `Hole ${currentHole}`,
             wagerStatus: (data.format || 'LIVE').toUpperCase(),
@@ -166,38 +208,35 @@ export default function MatchScreen({ matchId, onBack }) {
       drinks: scoreData.drinks
     });
 
-    // --- ASYNCHRONOUS TARGETED CARD PROTOCOL CHECKS ---
-    let matchedCardConfig = null;
+    if (ENABLE_CARD_MINTING) {
+      let matchedCardConfig = null;
 
-    // 1. OceanGate Validation
-    matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
-    
-    // 2. Whammy Validation
-    if (!matchedCardConfig) {
-      matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
-    }
-
-    // 3. Banquet Birdie Validation
-    if (!matchedCardConfig) {
-      matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
-    }
-
-    // --- OVERLAY INTERCEPT DETERMINATOR ---
-    if (matchedCardConfig) {
-      const completePayload = {
-        ...matchedCardConfig,
-        player: player.name || 'Clubhouse Golfer',
-        earnedByUserId: player.id,
-        hole: currentHole,
-        courseName: "Fores V Master Course"
-      };
-
-      setMintPayload(completePayload);
-      setIsMintingActive(true);
-    } else {
-      if (currentHole < 18) {
-        setCurrentHole(prev => prev + 1);
+      matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
+      
+      if (!matchedCardConfig) {
+        matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
       }
+
+      if (!matchedCardConfig) {
+        matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
+      }
+
+      if (matchedCardConfig) {
+        const completePayload = {
+          ...matchedCardConfig,
+          player: player.name || 'Clubhouse Golfer',
+          earnedByUserId: player.id,
+          hole: currentHole,
+          courseName: "Fores V Master Course"
+        };
+
+        setMintPayload(completePayload);
+        setIsMintingActive(true);
+      } else {
+        if (currentHole < 18) setCurrentHole(prev => prev + 1);
+      }
+    } else {
+      if (currentHole < 18) setCurrentHole(prev => prev + 1);
     }
   };
 
@@ -227,7 +266,7 @@ export default function MatchScreen({ matchId, onBack }) {
           
           <button 
             onClick={(e) => { e.stopPropagation(); setCurrentHole(Math.max(1, currentHole - 1)); }}
-            disabled={currentHole === 1}
+            disabled={currentHole === 1 || isInitializing}
             className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-8 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer"
           >
             ◀
@@ -250,7 +289,7 @@ export default function MatchScreen({ matchId, onBack }) {
         
         <button 
           onClick={(e) => { e.stopPropagation(); setCurrentHole(Math.min(18, currentHole + 1)); }}
-          disabled={currentHole === 18}
+          disabled={currentHole === 18 || isInitializing}
           className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-10 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer"
         >
           ▶
@@ -258,7 +297,8 @@ export default function MatchScreen({ matchId, onBack }) {
       </header>
 
       <main className="flex-1 relative w-full h-full z-0 bg-slate-950">
-         {isLoading || !activeHoleData ? (
+         {/* 🎯 Updated loading check to pause the map until the Smart Resume finishes */}
+         {isLoading || isInitializing || !activeHoleData ? (
            <div className="h-full flex items-center justify-center text-slate-600 font-black animate-pulse uppercase tracking-[0.2em] text-xs">
              Syncing Geospatial Arrays...
            </div>
@@ -280,7 +320,6 @@ export default function MatchScreen({ matchId, onBack }) {
         existingData={currentScoreData} 
       />
 
-      {/* RENDER MINTING FRAMEWORK INTERCEPT OVERLAY MODAL */}
       {isMintingActive && mintPayload && (
         <CardMintingProtocol 
           mintData={mintPayload}
