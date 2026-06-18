@@ -79,14 +79,15 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   // Fetch and parse the user's bag_json from the garages table
   useEffect(() => {
     const fetchGarageData = async () => {
-      if (!player?.id) return;
+      // Safely ensure we have the auth_id before fetching
+      if (!player?.auth_id) return;
       
       try {
         const { data, error } = await supabase
           .from('garages')
           .select('bag_json')
-          // 🎯 FIXED: Changed query parameter to player_id exclusively
-          .eq('player_id', player.id)
+          // 🎯 FIXED: Matched the query to your Garage save logic
+          .eq('profile_id', player.auth_id)
           .single(); 
           
         if (error) throw error;
@@ -112,7 +113,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     };
 
     fetchGarageData();
-  }, [player?.id]);
+  }, [player?.auth_id]); // Updated dependency
 
   useEffect(() => {
     setHasInitializedTarget(false);
@@ -163,7 +164,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     if (!player || !holeData) return;
 
     try {
-      // 🎯 FIXED: Completely replaced profile_id with player_id in payload and onConflict constraints
       const dbPayload = {
         player_id: player.id,
         matchup_id: Number(insights?.matchupId || 7),
@@ -217,7 +217,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
           .map(tier => tier.id);
 
         if (newUnlocks.length > 0) {
-          // 🎯 FIXED: Changed identifier mapping query to target player_id on the players table
           const { error: patchError } = await supabase
             .from('players')
             .update({ unlocked_badges: [...currentlyUnlocked, ...newUnlocks] })
