@@ -113,7 +113,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     };
 
     fetchGarageData();
-  }, [player?.auth_id]); // Updated dependency
+  }, [player?.auth_id]);
 
   useEffect(() => {
     setHasInitializedTarget(false);
@@ -238,7 +238,8 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in font-sans">
       
       {/* --- FLOATING LEFT STACK --- */}
-      <div className="absolute top-10 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
+      {/* 🎯 FIXED: Changed top-10 to top-24 to clear navigation headers */}
+      <div className="absolute top-24 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2 px-3 flex items-center justify-between shadow-lg pointer-events-auto">
           {weather ? (
             <div className="flex items-center gap-2 font-mono text-[10px] font-black w-full justify-between">
@@ -281,7 +282,8 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       </div>
 
       {/* --- FLOATING RIGHT STACK --- */}
-      <div className="absolute top-10 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
+      {/* 🎯 FIXED: Changed top-10 to top-24 to clear navigation headers */}
+      <div className="absolute top-24 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
         <button 
           onClick={() => onLogScoreClick && onLogScoreClick(handleInlineSaveScore)}
           className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95"
