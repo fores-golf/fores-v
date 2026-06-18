@@ -64,6 +64,9 @@ const targetIcon = new L.divIcon({
 });
 
 export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }) {
+  // 🛑 KILL SWITCH: Set to true to re-enable the badge unlocking / card minting engine
+  const ENABLE_CARD_MINTING = false;
+
   const { player, refreshIdentity } = useUser();
   const [mapType, setMapType] = useState('satellite');
   const [targetPos, setTargetPos] = useState(null);
@@ -76,17 +79,14 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   const mapCenter = holeData?.leafletCenter; 
   const weather = useWeather(mapCenter?.[0], mapCenter?.[1]);
 
-  // Fetch and parse the user's bag_json from the garages table
   useEffect(() => {
     const fetchGarageData = async () => {
-      // Safely ensure we have the auth_id before fetching
       if (!player?.auth_id) return;
       
       try {
         const { data, error } = await supabase
           .from('garages')
           .select('bag_json')
-          // 🎯 FIXED: Matched the query to your Garage save logic
           .eq('profile_id', player.auth_id)
           .single(); 
           
@@ -164,6 +164,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     if (!player || !holeData) return;
 
     try {
+      // 1. ALWAYS save the score (unaffected by kill switch)
       const dbPayload = {
         player_id: player.id,
         matchup_id: Number(insights?.matchupId || 7),
@@ -184,45 +185,48 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
 
       if (saveError) throw saveError;
 
-      const { data: scores, error: fetchError } = await supabase
-        .from('hole_scores')
-        .select('gross_score, par')
-        .eq('player_id', player.id)
-        .order('updated_at', { ascending: true });
+      // 2. Only run the Card Minting Protocol if enabled
+      if (ENABLE_CARD_MINTING) {
+        const { data: scores, error: fetchError } = await supabase
+          .from('hole_scores')
+          .select('gross_score, par')
+          .eq('player_id', player.id)
+          .order('updated_at', { ascending: true });
 
-      if (fetchError) throw fetchError;
+        if (fetchError) throw fetchError;
 
-      if (scores && scores.length > 0) {
-        let maxStreak = 0;
-        let currentStreak = 0;
+        if (scores && scores.length > 0) {
+          let maxStreak = 0;
+          let currentStreak = 0;
 
-        scores.forEach((hole) => {
-          if (hole.gross_score !== null && hole.par !== null && hole.gross_score <= hole.par) {
-            currentStreak++;
-            if (currentStreak > maxStreak) maxStreak = currentStreak;
-          } else {
-            currentStreak = 0;
+          scores.forEach((hole) => {
+            if (hole.gross_score !== null && hole.par !== null && hole.gross_score <= hole.par) {
+              currentStreak++;
+              if (currentStreak > maxStreak) maxStreak = currentStreak;
+            } else {
+              currentStreak = 0;
+            }
+          });
+
+          const badgeTiers = [
+            { id: 'b1', target: 2 }, { id: 'b2', target: 3 }, { id: 'b3', target: 4 },
+            { id: 'b4', target: 5 }, { id: 'b5', target: 6 }, { id: 'b6', target: 7 },
+            { id: 'b7', target: 8 }, { id: 'b8', target: 9 }, { id: 'b9', target: 10 }
+          ];
+
+          const currentlyUnlocked = player.unlocked_badges || [];
+          const newUnlocks = badgeTiers
+            .filter(tier => maxStreak >= tier.target && !currentlyUnlocked.includes(tier.id))
+            .map(tier => tier.id);
+
+          if (newUnlocks.length > 0) {
+            const { error: patchError } = await supabase
+              .from('players')
+              .update({ unlocked_badges: [...currentlyUnlocked, ...newUnlocks] })
+              .eq('id', player.id);
+
+            if (patchError) throw patchError;
           }
-        });
-
-        const badgeTiers = [
-          { id: 'b1', target: 2 }, { id: 'b2', target: 3 }, { id: 'b3', target: 4 },
-          { id: 'b4', target: 5 }, { id: 'b5', target: 6 }, { id: 'b6', target: 7 },
-          { id: 'b7', target: 8 }, { id: 'b8', target: 9 }, { id: 'b9', target: 10 }
-        ];
-
-        const currentlyUnlocked = player.unlocked_badges || [];
-        const newUnlocks = badgeTiers
-          .filter(tier => maxStreak >= tier.target && !currentlyUnlocked.includes(tier.id))
-          .map(tier => tier.id);
-
-        if (newUnlocks.length > 0) {
-          const { error: patchError } = await supabase
-            .from('players')
-            .update({ unlocked_badges: [...currentlyUnlocked, ...newUnlocks] })
-            .eq('id', player.id);
-
-          if (patchError) throw patchError;
         }
       }
 
@@ -238,7 +242,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in font-sans">
       
       {/* --- FLOATING LEFT STACK --- */}
-      {/* 🎯 FIXED: Changed top-10 to top-24 to clear navigation headers */}
       <div className="absolute top-24 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2 px-3 flex items-center justify-between shadow-lg pointer-events-auto">
           {weather ? (
@@ -282,7 +285,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       </div>
 
       {/* --- FLOATING RIGHT STACK --- */}
-      {/* 🎯 FIXED: Changed top-10 to top-24 to clear navigation headers */}
       <div className="absolute top-24 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
         <button 
           onClick={() => onLogScoreClick && onLogScoreClick(handleInlineSaveScore)}
