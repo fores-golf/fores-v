@@ -5,23 +5,26 @@ import { supabase } from '../../config/supabaseClient';
 // Adjust this import path based on where your probability engine file is located relative to this file
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
+// Metadata mapping for the UI
+const ROUND_METADATA = {
+  1: { date: 'June 25th', course: 'Quarry' },
+  2: { date: 'June 26th', course: 'Quarry' },
+  3: { date: 'June 26th', course: 'Legend' },
+  4: { date: 'June 27th', course: 'Legend' },
+  5: { date: 'June 27th', course: 'Quarry' }
+};
+
 export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   const { player, isAdmin } = useUser();
   const { allMatches, golfers, loading, refreshMatches } = useScheduleData();
   const [activeRound, setActiveRound] = useState(1);
   
-  // Admin Panel UI State
-  const [showAdminPanel, setShowAdminPanel] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
+  // Admin / Captain State
+  const [isProcessing, setIsProcessing] = useState(false);
   
-  // New Match Form State
-  const [selectedRound, setSelectedRound] = useState('1');
-  const [matchFormat, setMatchFormat] = useState('1v1');
-  const [teeTime, setTeeTime] = useState(''); 
-  const [t1p1, setT1p1] = useState('');
-  const [t1p2, setT1p2] = useState('');
-  const [t2p1, setT2p1] = useState('');
-  const [t2p2, setT2p2] = useState('');
+  // Inline Editing State
+  const [editingMatchId, setEditingMatchId] = useState(null);
+  const [editForm, setEditForm] = useState({ t1p1: '', t1p2: '', t2p1: '', t2p2: '', format: '' });
 
   if (loading) {
     return (
@@ -31,49 +34,132 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     );
   }
 
-  // --- STRICT ROSTER SEGMENTATION ENGINE ---
+  // --- CAPTAIN AUTHORIZATION ENGINE ---
+  const isClamsCaptain = isAdmin || player?.name?.includes('Kevin Gurney');
+  const isBrothelmenCaptain = isAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274';
+  const isAnyCaptain = isClamsCaptain || isBrothelmenCaptain;
+
+  // --- STRICT ROSTER SEGMENTATION ---
   const team1Options = golfers.filter(g => g.team === 'Slanted Clams');
   const team2Options = golfers.filter(g => g.team === 'Clam Brothelmen');
 
-  const handleCreateMatch = async (e) => {
-    e.preventDefault();
-    if (!t1p1 || !t2p1 || !teeTime) {
-      alert('Tee Time, Team 1 Lead, and Team 2 Lead are required parameters.');
-      return;
-    }
-
+  // --- THE "PRE-SET" SCHEDULE GENERATOR ---
+  const handleGenerateSkeleton = async () => {
+    if (!window.confirm("Are you sure? This will deploy 20 placeholder matches into the database.")) return;
+    
+    setIsProcessing(true);
     try {
-      setIsCreating(true);
+      const scheduleBlueprint = [
+        { round: 1, format: 'TBD', times: ['15:30', '15:40', '15:50', '16:00'] },
+        { round: 2, format: 'TBD', times: ['09:00', '09:10', '09:20', '09:30'] },
+        { round: 3, format: 'TBD', times: ['15:30', '15:40', '15:50', '16:00'] },
+        { round: 4, format: 'TBD', times: ['09:00', '09:10', '09:20', '09:30'] },
+        { round: 5, format: '1v1', times: ['15:30', '15:40', '15:50', '16:00'] }
+      ];
 
-      const nextMatchNumber = allMatches.length + 1;
-      
-      const { error } = await supabase.from('matches').insert({
-        round: parseInt(selectedRound),
-        match_number: nextMatchNumber,
-        format: matchFormat,
-        tee_time: teeTime, 
-        team1_player1: t1p1,
-        team1_player2: t1p2 || null,
-        team2_player1: t2p1,
-        team2_player2: t2p2 || null,
-        team1_score: 0,
-        team2_score: 0,
-        status: 'scheduled',
-        is_live: false
+      let matchCounter = 1;
+      const inserts = [];
+
+      scheduleBlueprint.forEach(roundData => {
+        roundData.times.forEach(time => {
+          inserts.push({
+            round: roundData.round,
+            match_number: matchCounter++,
+            format: roundData.format,
+            tee_time: time,
+            team1_score: 0,
+            team2_score: 0,
+            status: 'scheduled',
+            is_live: false
+          });
+        });
       });
+
+      const { error } = await supabase.from('matches').insert(inserts);
+      if (error) throw error;
+      
+      await refreshMatches();
+    } catch (err) {
+      alert("Error generating schedule: " + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // --- UPDATE EXISTING MATCH ROSTER ---
+  const handleSaveRoster = async (matchId) => {
+    setIsProcessing(true);
+    try {
+      const updates = {};
+      if (isClamsCaptain) {
+        updates.team1_player1 = editForm.t1p1 || null;
+        updates.team1_player2 = editForm.t1p2 || null;
+      }
+      if (isBrothelmenCaptain) {
+        updates.team2_player1 = editForm.t2p1 || null;
+        updates.team2_player2 = editForm.t2p2 || null;
+      }
+      if (isAdmin) {
+        updates.format = editForm.format || 'TBD';
+      }
+
+      const { error } = await supabase
+        .from('matches')
+        .update(updates)
+        .eq('id', matchId);
 
       if (error) throw error;
 
-      // Reset form variables
-      setT1p1(''); setT1p2(''); setT2p1(''); setT2p2(''); setTeeTime('');
-      setShowAdminPanel(false);
-      await refreshMatches(); 
-
+      setEditingMatchId(null);
+      await refreshMatches();
     } catch (err) {
-      alert('Failed to deploy match matrix: ' + err.message);
+      alert("Failed to update roster: " + err.message);
     } finally {
-      setIsCreating(false);
+      setIsProcessing(false);
     }
+  };
+
+  // --- HARD RESET MATCH (ADMIN ONLY) ---
+  const handleResetMatch = async (matchId) => {
+    if (!window.confirm("WARNING: This will completely wipe the roster, scores, and status for this match slot. Are you sure?")) return;
+    
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase
+        .from('matches')
+        .update({
+          team1_player1: null,
+          team1_player2: null,
+          team2_player1: null,
+          team2_player2: null,
+          team1_score: 0,
+          team2_score: 0,
+          status: 'scheduled',
+          is_live: false,
+          format: 'TBD'
+        })
+        .eq('id', matchId);
+
+      if (error) throw error;
+
+      setEditingMatchId(null);
+      await refreshMatches();
+    } catch (err) {
+      alert("Failed to reset match: " + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const startEditing = (match) => {
+    setEditingMatchId(match.id);
+    setEditForm({
+      t1p1: match.team1_player1 || '',
+      t1p2: match.team1_player2 || '',
+      t2p1: match.team2_player1 || '',
+      t2p2: match.team2_player2 || '',
+      format: match.format || 'TBD'
+    });
   };
 
   const formatDisplayTime = (timeStr) => {
@@ -85,27 +171,17 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     return `${displayHour}:${minutes} ${ampm}`;
   };
 
-  // --- BULLETPROOF ID TRANSLATION ---
   const getGolferName = (identifier) => {
     if (!identifier) return null;
-    
-    // Defensive catch: If Supabase auto-joined the profile object, grab the name directly
-    if (typeof identifier === 'object' && identifier.name) {
-      return identifier.name;
-    }
-
-    // Aggressively normalize the string to avoid case or whitespace mismatches
+    if (typeof identifier === 'object' && identifier.name) return identifier.name;
     const safeIdentifier = String(identifier).trim().toLowerCase();
-    
     const found = golfers.find(g => 
       String(g.id).trim().toLowerCase() === safeIdentifier || 
       String(g.name).trim().toLowerCase() === safeIdentifier
     );
-    
     return found ? found.name : identifier; 
   };
 
-  // Filter matches for the active round, then sort them chronologically by tee_time
   const displayedMatches = allMatches
     .filter(m => m.round === activeRound)
     .sort((a, b) => {
@@ -115,6 +191,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     });
 
   const rounds = [1, 2, 3, 4, 5];
+  const roundMeta = ROUND_METADATA[activeRound];
 
   return (
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans flex flex-col pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
@@ -128,108 +205,20 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
         <h1 className="font-black text-lg tracking-tight uppercase italic">
           Tournament Log
         </h1>
-        
-        {isAdmin ? (
-          <button 
-            onClick={() => setShowAdminPanel(!showAdminPanel)}
-            className={`text-[10px] font-black tracking-widest uppercase border px-3 py-1.5 rounded-xl transition-all ${
-              showAdminPanel 
-                ? 'bg-amber-500 text-black border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.3)]' 
-                : 'text-amber-500 border-amber-500/30 bg-amber-500/5'
-            }`}
-          >
-            {showAdminPanel ? 'Cancel' : '+ New Match'}
-          </button>
-        ) : (
-          <div className="w-8 h-8"></div>
-        )}
+        <div className="w-12"></div>
       </div>
 
-      {/* --- RECONFIGURED COMMISSIONER DRAWER --- */}
-      {isAdmin && showAdminPanel && (
-        <div className="bg-[#111726] border-b border-amber-500/20 p-5 animate-fade-in relative z-20 shadow-2xl">
-          <div className="max-w-md mx-auto">
-            <h2 className="text-xs font-black uppercase tracking-widest text-amber-500 mb-4 flex items-center gap-1.5">
-              <span>🛠️</span> Commissioner Command Deck
-            </h2>
-            
-            <form onSubmit={handleCreateMatch} className="space-y-4">
-              
-              {/* Row 1: Round Selector & Game Format Selector */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-black uppercase tracking-wider text-slate-400">Target Round</label>
-                  <select value={selectedRound} onChange={(e) => setSelectedRound(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white font-bold focus:outline-none focus:border-amber-500/50">
-                    <option value="1">Round 1</option>
-                    <option value="2">Round 2</option>
-                    <option value="3">Round 3</option>
-                    <option value="4">Round 4</option>
-                    <option value="5">Round 5</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <label className="text-[9px] font-black uppercase tracking-wider text-slate-400">Game Format</label>
-                  <select value={matchFormat} onChange={(e) => setMatchFormat(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white font-bold focus:outline-none focus:border-amber-500/50">
-                    <option value="1v1">1v1 Match Play</option>
-                    <option value="Scramble">2-Man Scramble</option>
-                    <option value="Shamble">2-Man Shamble</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Row 2: NATIVE TIME SELECTOR INPUT */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[9px] font-black uppercase tracking-wider text-slate-400">Tee Time</label>
-                <input 
-                  type="time" 
-                  value={teeTime}
-                  onChange={(e) => setTeeTime(e.target.value)}
-                  className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm font-semibold text-white focus:outline-none focus:border-amber-500/50 block color-scheme-dark"
-                  style={{ colorScheme: 'dark' }}
-                />
-              </div>
-
-              {/* Row 3: SEGMENTED PAIRINGS MATRIX */}
-              <div className="grid grid-cols-2 gap-4 bg-black/20 p-4 rounded-2xl border border-white/5">
-                
-                {/* Segmented Team 1 - Slanted Clams Only */}
-                <div className="space-y-2.5">
-                  <span className="text-[9px] font-black uppercase text-blue-400 block tracking-widest">Slanted Clams</span>
-                  <select value={t1p1} onChange={(e) => setT1p1(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-blue-500/50">
-                    <option value="">Lead Player...</option>
-                    {team1Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
-                  </select>
-                  <select value={t1p2} onChange={(e) => setT1p2(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-400 font-bold focus:outline-none focus:border-blue-500/50">
-                    <option value="">Partner (Optional)...</option>
-                    {team1Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
-                  </select>
-                </div>
-
-                {/* Segmented Team 2 - Clam Brothelmen Only */}
-                <div className="space-y-2.5 border-l border-white/5 pl-4">
-                  <span className="text-[9px] font-black uppercase text-red-400 block tracking-widest">Clam Brothelmen</span>
-                  <select value={t2p1} onChange={(e) => setT2p1(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-200 font-bold focus:outline-none focus:border-red-500/50">
-                    <option value="">Lead Player...</option>
-                    {team2Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
-                  </select>
-                  <select value={t2p2} onChange={(e) => setT2p2(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl p-2.5 text-xs text-slate-400 font-bold focus:outline-none focus:border-red-500/50">
-                    <option value="">Partner (Optional)...</option>
-                    {team2Options.map(g => <option key={g.id} value={g.id} className="bg-[#0f172a]">{g.name}</option>)}
-                  </select>
-                </div>
-
-              </div>
-
-              <button 
-                type="submit"
-                disabled={isCreating}
-                className="w-full bg-amber-500 hover:bg-amber-600 text-black font-black py-3.5 rounded-xl transition-all uppercase tracking-wider text-xs mt-2 disabled:opacity-50 shadow-lg shadow-amber-500/10"
-              >
-                {isCreating ? 'Deploying Match...' : 'Deploy Pairing to Database'}
-              </button>
-            </form>
-          </div>
+      {/* Auto-Generate Button */}
+      {isAdmin && allMatches.length === 0 && (
+        <div className="p-5 bg-amber-500/10 border-b border-amber-500/20 text-center">
+          <p className="text-xs text-amber-500 font-bold mb-3 uppercase tracking-wider">Database is currently empty</p>
+          <button 
+            onClick={handleGenerateSkeleton}
+            disabled={isProcessing}
+            className="bg-amber-500 text-black font-black uppercase text-xs tracking-widest px-6 py-3 rounded-xl shadow-[0_0_15px_rgba(245,158,11,0.3)] active:scale-95 transition-all"
+          >
+            {isProcessing ? 'Generating...' : 'Initialize Base Schedule'}
+          </button>
         </div>
       )}
 
@@ -252,6 +241,13 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
         </div>
       </div>
 
+      {/* Round Meta Banner */}
+      <div className="text-center pt-5 pb-1 max-w-md mx-auto w-full">
+        <h2 className="text-sm font-black uppercase tracking-[0.2em] text-slate-300">
+          {roundMeta.date} <span className="text-amber-500 px-2">—</span> {roundMeta.course}
+        </h2>
+      </div>
+
       {/* Matches Feed Log Timeline */}
       <main className="p-5 flex flex-col gap-4 max-w-md mx-auto w-full flex-1">
         {displayedMatches.length === 0 ? (
@@ -261,7 +257,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
         ) : (
           displayedMatches.map((match) => {
             
-            // --- BULLETPROOF AUTH CHECK ---
             const safePlayerId = player?.id ? String(player.id).trim().toLowerCase() : null;
             const safePlayerName = player?.name ? String(player.name).trim().toLowerCase() : null;
             
@@ -269,77 +264,171 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
               match.team1_player1, match.team1_player2,
               match.team2_player1, match.team2_player2
             ].filter(Boolean).map(p => {
-              // Defensive catch for nested objects
               const val = typeof p === 'object' ? (p.id || p.name) : p;
               return String(val).trim().toLowerCase();
             });
 
             const isMyMatch = matchParticipants.some(p => p === safePlayerId || p === safePlayerName);
+            const isEditing = editingMatchId === match.id;
+
+            // Captains can only edit if it hasn't started yet. Admins can edit anytime.
+            const canEdit = isAdmin || (isAnyCaptain && match.status === 'scheduled' && !match.is_live);
 
             return (
               <div 
                 key={match.id}
                 className={`bg-[#121827] rounded-2xl p-4 border transition-all flex flex-col gap-4 relative overflow-hidden ${
-                  isMyMatch ? 'border-[#34d399]/40 shadow-[0_0_20px_rgba(52,211,153,0.05)]' : 'border-white/5'
+                  isMyMatch && !isEditing ? 'border-[#34d399]/40 shadow-[0_0_20px_rgba(52,211,153,0.05)]' : 'border-white/5'
                 }`}
               >
-                {isMyMatch && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#34d399] to-emerald-600"></div>}
+                {isMyMatch && !isEditing && <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#34d399] to-emerald-600"></div>}
 
                 {/* Card Header */}
                 <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-500">
                   <div className="flex items-center gap-1.5">
-                    <span>{match.format || '1v1'}</span>
+                    {isEditing && isAdmin ? (
+                      <select 
+                        value={editForm.format} 
+                        onChange={(e) => setEditForm({...editForm, format: e.target.value})}
+                        className="bg-black/50 border border-white/10 rounded px-2 py-1 text-[#34d399]"
+                      >
+                        <option value="TBD">TBD</option>
+                        <option value="1v1">1v1</option>
+                        <option value="Scramble">Scramble</option>
+                        <option value="Shamble">Shamble</option>
+                        <option value="Vegas">Vegas</option>
+                      </select>
+                    ) : (
+                      <span className={match.format !== 'TBD' ? 'text-[#34d399]' : ''}>{match.format || 'TBD'}</span>
+                    )}
                     <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
                     <span className="text-slate-300 font-mono text-xs font-bold tracking-tight">{formatDisplayTime(match.tee_time)}</span>
+                    <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
+                    <span className="text-amber-500/80">{roundMeta.course}</span>
                   </div>
-                  {match.is_live ? (
-                    <span className="text-[#34d399] bg-[#34d399]/10 px-2 py-0.5 rounded-md border border-[#34d399]/20 flex items-center gap-1 animate-pulse">Live Scoring</span>
-                  ) : match.status === 'completed' ? (
-                    <span className="text-slate-400 bg-white/5 px-2 py-0.5 rounded-md">Final</span>
-                  ) : (
-                    <span className="text-slate-600">Scheduled</span>
+                  
+                  {canEdit && !isEditing && (
+                    <button 
+                      onClick={() => startEditing(match)}
+                      className="text-amber-500 hover:text-amber-400 bg-amber-500/10 px-2 py-1 rounded transition-colors"
+                    >
+                      {match.team1_player1 ? 'Edit' : 'Assign'}
+                    </button>
+                  )}
+                  {isEditing && (
+                    <div className="flex items-center gap-2">
+                      {isAdmin && (
+                         <button 
+                           onClick={() => handleResetMatch(match.id)}
+                           disabled={isProcessing}
+                           className="text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded active:scale-95 transition-all"
+                         >
+                           Reset
+                         </button>
+                      )}
+                      <button 
+                        onClick={() => setEditingMatchId(null)}
+                        disabled={isProcessing}
+                        className="text-slate-400 bg-white/5 border border-white/10 px-2.5 py-1 rounded active:scale-95 transition-all"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        onClick={() => handleSaveRoster(match.id)}
+                        disabled={isProcessing}
+                        className="text-black bg-amber-500 px-3 py-1 rounded shadow-lg shadow-amber-500/20 active:scale-95 transition-all"
+                      >
+                        {isProcessing ? '...' : 'Save'}
+                      </button>
+                    </div>
                   )}
                 </div>
 
+                {/* --- THE ASSIGNMENT UI MATRIX --- */}
                 <div className="grid grid-cols-2 gap-4 items-center bg-black/20 p-3 rounded-xl border border-white/5">
+                  
+                  {/* SLANTED CLAMS SIDE */}
                   <div className="space-y-1">
                     <span className="text-[9px] font-black uppercase tracking-wider text-blue-400">Slanted Clams</span>
-                    <div className="text-sm font-black tracking-tight truncate">{getGolferName(match.team1_player1)}</div>
-                    <div className="text-sm font-black tracking-tight truncate text-slate-400">{getGolferName(match.team1_player2) || 'Single Solo'}</div>
+                    
+                    {isEditing && isClamsCaptain ? (
+                      <div className="space-y-2 mt-2">
+                        <select value={editForm.t1p1} onChange={(e) => setEditForm({...editForm, t1p1: e.target.value})} className="w-full bg-black/40 border border-blue-500/30 rounded p-1.5 text-xs text-white">
+                          <option value="">Select Lead...</option>
+                          {team1Options.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                        <select value={editForm.t1p2} onChange={(e) => setEditForm({...editForm, t1p2: e.target.value})} className="w-full bg-black/40 border border-blue-500/30 rounded p-1.5 text-xs text-slate-400">
+                          <option value="">Partner (Optional)...</option>
+                          {team1Options.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm font-black tracking-tight truncate">{getGolferName(match.team1_player1) || 'TBD'}</div>
+                        <div className="text-sm font-black tracking-tight truncate text-slate-400">
+                           {match.team1_player2 ? getGolferName(match.team1_player2) : (match.team1_player1 ? 'Single Solo' : '')}
+                        </div>
+                      </>
+                    )}
                   </div>
 
+                  {/* CLAM BROTHELMEN SIDE */}
                   <div className="space-y-1 text-right border-l border-white/5 pl-4">
                     <span className="text-[9px] font-black uppercase tracking-wider text-red-400">Clam Brothelmen</span>
-                    <div className="text-sm font-black tracking-tight truncate">{getGolferName(match.team2_player1)}</div>
-                    <div className="text-sm font-black tracking-tight truncate text-slate-400">{getGolferName(match.team2_player2) || 'Single Solo'}</div>
+                    
+                    {isEditing && isBrothelmenCaptain ? (
+                      <div className="space-y-2 mt-2">
+                        <select value={editForm.t2p1} onChange={(e) => setEditForm({...editForm, t2p1: e.target.value})} className="w-full bg-black/40 border border-red-500/30 rounded p-1.5 text-xs text-white">
+                          <option value="">Select Lead...</option>
+                          {team2Options.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                        <select value={editForm.t2p2} onChange={(e) => setEditForm({...editForm, t2p2: e.target.value})} className="w-full bg-black/40 border border-red-500/30 rounded p-1.5 text-xs text-slate-400">
+                          <option value="">Partner (Optional)...</option>
+                          {team2Options.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                        </select>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm font-black tracking-tight truncate">{getGolferName(match.team2_player1) || 'TBD'}</div>
+                        <div className="text-sm font-black tracking-tight truncate text-slate-400">
+                          {match.team2_player2 ? getGolferName(match.team2_player2) : (match.team2_player1 ? 'Single Solo' : '')}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                {/* PROBABILITY ENGINE */}
-                <MatchProbabilityBar 
-                  matchId={match.id} 
-                  status={match.status} 
-                  team1Name={getGolferName(match.team1_player1)}
-                  team2Name={getGolferName(match.team2_player1)}
-                />
+                {/* Hide interaction bar when editing so things stay clean */}
+                {!isEditing && (
+                  <>
+                    {match.team1_player1 && match.team2_player1 && (
+                      <MatchProbabilityBar 
+                        matchId={match.id} 
+                        status={match.status} 
+                        team1Name={getGolferName(match.team1_player1)}
+                        team2Name={getGolferName(match.team2_player1)}
+                      />
+                    )}
 
-                <div className="flex justify-between items-center border-t border-white/5 pt-3 mt-1">
-                  <div className="flex flex-col">
-                    <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Match State</span>
-                    <span className="text-sm font-black tracking-tighter text-slate-200 tabular-nums">
-                      {match.status === 'completed' || match.is_live ? `${match.team1_score} vs ${match.team2_score}` : 'AS // TEE 1'}
-                    </span>
-                  </div>
+                    <div className="flex justify-between items-center border-t border-white/5 pt-3 mt-1">
+                      <div className="flex flex-col">
+                        <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Match State</span>
+                        <span className="text-sm font-black tracking-tighter text-slate-200 tabular-nums">
+                          {match.status === 'completed' || match.is_live ? `${match.team1_score} vs ${match.team2_score}` : 'AS // TEE 1'}
+                        </span>
+                      </div>
 
-                  <button 
-                    onClick={() => onLaunchScoringEngine(match.id)}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-transform active:scale-95 ${
-                      isMyMatch ? 'bg-[#34d399] text-black' : 'bg-white/5 text-slate-300 border border-white/10'
-                    }`}
-                  >
-                    {isMyMatch ? 'Score My Card' : 'View Broadcast'}
-                  </button>
-                </div>
+                      <button 
+                        onClick={() => onLaunchScoringEngine(match.id)}
+                        className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-transform active:scale-95 ${
+                          isMyMatch ? 'bg-[#34d399] text-black' : 'bg-white/5 text-slate-300 border border-white/10'
+                        }`}
+                      >
+                        {isMyMatch ? 'Score My Card' : 'View Broadcast'}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             );
           })

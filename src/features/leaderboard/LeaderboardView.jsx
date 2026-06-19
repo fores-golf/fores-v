@@ -3,6 +3,15 @@ import { useLeaderboardData } from './hooks/useLeaderboardData';
 // Adjust this import path based on where your probability engine file is located
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
+// Metadata mapping for the UI
+const ROUND_METADATA = {
+  1: { date: 'June 25th', course: 'Quarry' },
+  2: { date: 'June 26th', course: 'Quarry' },
+  3: { date: 'June 26th', course: 'Legend' },
+  4: { date: 'June 27th', course: 'Legend' },
+  5: { date: 'June 27th', course: 'Quarry' }
+};
+
 export default function LeaderboardView({ onBack }) {
   const [viewMode, setViewMode] = useState('team'); 
   const { standings, matchHistory, individualStats, loading } = useLeaderboardData();
@@ -86,49 +95,63 @@ export default function LeaderboardView({ onBack }) {
                     No tournament pairings published yet.
                   </div>
                 ) : (
-                  matchHistory.map((match) => (
-                    <div key={match.id} className="bg-white/5 border border-white/5 rounded-2xl p-4 shadow-md backdrop-blur-md relative overflow-hidden flex flex-col gap-3">
-                      
-                      <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                        <span className="text-[10px] font-black tracking-wider uppercase text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">
-                          Round {match.round} • {match.format}
-                        </span>
-                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded ${
-                          match.status === 'completed' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
-                          match.status === 'live' ? 'bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse' :
-                          'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        }`}>
-                          {match.status}
-                        </span>
+                  matchHistory.map((match) => {
+                    const roundMeta = ROUND_METADATA[match.round] || { date: 'TBD', course: 'TBD' };
+
+                    return (
+                      <div key={match.id} className="bg-white/5 border border-white/5 rounded-2xl p-4 shadow-md backdrop-blur-md relative overflow-hidden flex flex-col gap-3">
+                        
+                        <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-black tracking-wider uppercase text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">
+                              R{match.round} • {match.format}
+                            </span>
+                            <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
+                            <span className="text-[9px] font-bold text-amber-500/80 uppercase tracking-widest">
+                              {roundMeta.course}
+                            </span>
+                          </div>
+                          
+                          <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded shrink-0 ${
+                            match.status === 'completed' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' :
+                            match.status === 'live' ? 'bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse' :
+                            'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          }`}>
+                            {match.status}
+                          </span>
+                        </div>
+
+                        <div className="flex justify-between items-center text-sm">
+                          <div className="flex flex-col gap-0.5 text-left w-[42%]">
+                            <span className="font-black tracking-tight text-slate-200 truncate">{match.team1_player1 || 'TBD'}</span>
+                            {match.team1_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team1_player2}</span>}
+                          </div>
+
+                          <div className="flex items-center gap-2 bg-black/30 px-3 py-1.5 rounded-xl border border-white/5 font-black text-base tabular-nums shadow-inner">
+                            <span className={match.team1_score > match.team2_score ? "text-blue-400" : "text-slate-400"}>{match.team1_score}</span>
+                            <span className="text-xs text-slate-600 font-bold">-</span>
+                            <span className={match.team2_score > match.team1_score ? "text-red-400" : "text-slate-400"}>{match.team2_score}</span>
+                          </div>
+
+                          <div className="flex flex-col gap-0.5 text-right w-[42%]">
+                            <span className="font-black tracking-tight text-slate-200 truncate">{match.team2_player1 || 'TBD'}</span>
+                            {match.team2_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team2_player2}</span>}
+                          </div>
+                        </div>
+
+                        {/* GATE THE PROBABILITY ENGINE SO IT DOES NOT CRASH ON BLANK ROSTERS */}
+                        {match.team1_player1 && match.team2_player1 && (
+                          <MatchProbabilityBar 
+                            matchId={match.id} 
+                            status={match.status} 
+                            team1Name={match.team1_player1}
+                            team2Name={match.team2_player1}
+                          />
+                        )}
+
                       </div>
-
-                      <div className="flex justify-between items-center text-sm">
-                        <div className="flex flex-col gap-0.5 text-left w-[42%]">
-                          <span className="font-black tracking-tight text-slate-200 truncate">{match.team1_player1}</span>
-                          {match.team1_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team1_player2}</span>}
-                        </div>
-
-                        <div className="flex items-center gap-2 bg-black/30 px-3 py-1.5 rounded-xl border border-white/5 font-black text-base tabular-nums shadow-inner">
-                          <span className={match.team1_score > match.team2_score ? "text-blue-400" : "text-slate-400"}>{match.team1_score}</span>
-                          <span className="text-xs text-slate-600 font-bold">-</span>
-                          <span className={match.team2_score > match.team1_score ? "text-red-400" : "text-slate-400"}>{match.team2_score}</span>
-                        </div>
-
-                        <div className="flex flex-col gap-0.5 text-right w-[42%]">
-                          <span className="font-black tracking-tight text-slate-200 truncate">{match.team2_player1}</span>
-                          {match.team2_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team2_player2}</span>}
-                        </div>
-                      </div>
-
-                      <MatchProbabilityBar 
-                        matchId={match.id} 
-                        status={match.status} 
-                        team1Name={match.team1_player1}
-                        team2Name={match.team2_player1}
-                      />
-
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </section>
@@ -177,7 +200,7 @@ export default function LeaderboardView({ onBack }) {
                         <div className="flex flex-col items-center justify-center w-12">
                           <span className="text-[8px] font-black uppercase tracking-widest text-[#34d399] mb-1">Net</span>
                           <span className={`font-black tabular-nums leading-none drop-shadow-md ${golfer.completedRounds > 0 ? 'text-lg text-[#34d399]' : 'text-[10px] text-slate-500 mt-1'}`}>
-                            {/* 🎯 Displays "TBD" until the hook confirms 18 holes are finished */}
+                            {/* Displays "TBD" until the hook confirms 18 holes are finished */}
                             {golfer.netDisplay}
                           </span>
                         </div>
