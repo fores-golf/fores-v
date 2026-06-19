@@ -37,12 +37,10 @@ export default function DashboardView({
 
   // --- SPLASH SCREEN STATE (ONCE PER SESSION) ---
   const [showSplash, setShowSplash] = useState(() => {
-    // Check if they've already seen it this session
     return sessionStorage.getItem('fores_v_splash_seen') !== 'true';
   });
 
   const handleDismissSplash = () => {
-    // Lock it out for the rest of the session
     sessionStorage.setItem('fores_v_splash_seen', 'true');
     setShowSplash(false);
   };
@@ -51,7 +49,6 @@ export default function DashboardView({
   const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
 
   useEffect(() => {
-    // Target: June 25, 2026, 3:30 PM Central Time (UTC-5 during Daylight Saving)
     const targetDate = new Date('2026-06-25T15:30:00-05:00').getTime();
 
     const updateCountdown = () => {
@@ -68,13 +65,12 @@ export default function DashboardView({
       }
     };
 
-    updateCountdown(); // Run immediately on mount
+    updateCountdown(); 
     const intervalId = setInterval(updateCountdown, 1000);
 
     return () => clearInterval(intervalId);
   }, []);
 
-  // Handle the 3-second animation timeout on mount
   useEffect(() => {
     const timer = setTimeout(() => {
       setAnimateDice(false);
@@ -82,10 +78,16 @@ export default function DashboardView({
     return () => clearTimeout(timer);
   }, []);
 
-  // Helper function to map UUID back to Player Name
+  // 🎯 CORE FIX: Bulletproof auth_id translation
   const getPlayerName = (identifier) => {
     if (!identifier) return "TBD";
-    const found = golfers.find(g => g.id === identifier);
+    const cleanId = String(identifier).trim().toLowerCase();
+    
+    const found = golfers.find(g => 
+      (g.auth_id && String(g.auth_id).trim().toLowerCase() === cleanId) ||
+      (g.id && String(g.id).trim().toLowerCase() === cleanId)
+    );
+    
     return found ? found.name : identifier; 
   };
 
@@ -93,17 +95,13 @@ export default function DashboardView({
   const isMatchReadyToStart = (round, teeTime) => {
     if (!teeTime) return false;
     const meta = ROUND_METADATA[round];
-    if (!meta || !meta.parseDate) return true; // Fallback just in case
+    if (!meta || !meta.parseDate) return true; 
     
-    // Create an exact timestamp for the tee time in Central Time
     const matchDateStr = `${meta.parseDate}T${teeTime}:00-05:00`;
     const matchTime = new Date(matchDateStr).getTime();
     const now = new Date().getTime();
     
-    // 30 minutes in milliseconds
     const thirtyMinutesMs = 30 * 60 * 1000;
-    
-    // True if current time is past (Tee Time - 30 minutes)
     return now >= (matchTime - thirtyMinutesMs);
   };
 
@@ -159,12 +157,9 @@ export default function DashboardView({
           onClick={handleDismissSplash}
           className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#060911] cursor-pointer"
         >
-          {/* Splash Ambient Glow */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] h-[60%] bg-[#34d399]/15 blur-[150px] rounded-full pointer-events-none z-0 animate-pulse duration-[3000ms]"></div>
           
           <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 w-full max-w-sm space-y-6 animate-[fadeIn_0.5s_ease-out]">
-            
-            {/* Splash Title */}
             <div>
               <h2 className="text-4xl font-black tracking-tight uppercase italic bg-gradient-to-r from-white via-slate-100 via-white to-slate-500 bg-clip-text text-transparent leading-none select-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
                 Fores V
@@ -174,33 +169,28 @@ export default function DashboardView({
               </p>
             </div>
 
-            {/* Countdown Engine */}
             <div className="pt-6 w-full flex flex-col items-center">
               <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-3 animate-pulse">T-Minus</span>
               
               <div className="flex items-center justify-center gap-3 w-full bg-black/50 p-5 rounded-[2rem] border border-white/10 shadow-[0_0_40px_rgba(52,211,153,0.1),inset_0_2px_10px_rgba(0,0,0,0.5)] backdrop-blur-md">
-                {/* Days */}
                 <div className="flex flex-col items-center w-12">
                   <span className="text-3xl font-mono font-black text-[#34d399] drop-shadow-[0_0_10px_rgba(52,211,153,0.3)]">{timeLeft.days}</span>
                   <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Days</span>
                 </div>
                 <span className="text-xl font-black text-slate-700 pb-4">:</span>
                 
-                {/* Hours */}
                 <div className="flex flex-col items-center w-12">
                   <span className="text-3xl font-mono font-black text-slate-100">{timeLeft.hours.toString().padStart(2, '0')}</span>
                   <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Hrs</span>
                 </div>
                 <span className="text-xl font-black text-slate-700 pb-4">:</span>
                 
-                {/* Minutes */}
                 <div className="flex flex-col items-center w-12">
                   <span className="text-3xl font-mono font-black text-slate-100">{timeLeft.minutes.toString().padStart(2, '0')}</span>
                   <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Min</span>
                 </div>
                 <span className="text-xl font-black text-slate-700 pb-4">:</span>
                 
-                {/* Seconds */}
                 <div className="flex flex-col items-center w-12">
                   <span className="text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]">{timeLeft.seconds.toString().padStart(2, '0')}</span>
                   <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Sec</span>
@@ -232,7 +222,6 @@ export default function DashboardView({
           <div className="absolute inset-0 w-full h-[200%] bg-gradient-to-b from-transparent via-[#34d399]/5 to-transparent -translate-y-full animate-[skew-sweep_5s_ease-in-out_infinite] pointer-events-none z-0"></div>
           <div className="absolute left-6 top-1/2 -translate-y-1/2 w-24 h-24 bg-gradient-to-r from-[#34d399]/10 to-blue-500/0 rounded-full blur-xl pointer-events-none z-0"></div>
 
-          {/* Secret Backdoor Trigger: Tapping logo container 5 times opens card collection vault */}
           <div 
             onClick={() => {
               window.f5_vault_clicks = (window.f5_vault_clicks || 0) + 1;
@@ -265,7 +254,6 @@ export default function DashboardView({
             </div>
           </div>
 
-          {/* Unassuming, stylized SVG Dice Icon as the backdoor Mulligans Arena entrance */}
           <button
             onClick={(e) => {
               e.stopPropagation();
