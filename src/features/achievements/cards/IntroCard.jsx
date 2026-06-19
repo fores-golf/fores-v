@@ -2,23 +2,22 @@ import React, { useState, useRef } from 'react';
 import foresVLogo from '/fores-v-logo.png';
 import topoMapBg from '/topo-bg.jpg'; 
 
-export default function PlayerIntroCard({ 
-  playerName = "Trevor Roeger", 
-  nickname = "Tres Putt Putz", 
+export default function IntroCard({ 
+  // 🎯 REVERTED: Back to your exact original prop names
+  playerName = "Unknown Player", 
+  nickname, 
   photoUrl, 
-  handicap = "4.2",
-  archetype = "Bomber", 
-  playerTeam = "Unassigned", // Receives the player's team configuration property string cleanly
-  hometown = "Denver, CO",
-  parallel = "1/1", 
-  serialNumber = 1,
-  
-  // Explicitly mapping table properties to fallback defaults cleanly
-  drivingDist = 295,
-  girPercentage = 64,
-  avgPutts = 1.8,
-  powerRating = 88,
-  shortGameRating = 74,
+  handicap = "0.0",
+  archetype = "Unassigned", 
+  playerTeam = "Unassigned",
+  hometown = "Classified",
+  parallel = "Base", 
+  serialNumber,
+  drivingDist = '--',
+  girPercentage = '--',
+  avgPutts = '--',
+  powerRating = 0,
+  shortGameRating = 0,
   scoutingReport = "Profile assessment pending official league clearance."
 }) {
   const cardRef = useRef(null);
@@ -27,6 +26,7 @@ export default function PlayerIntroCard({
   const [glarePosition, setGlarePosition] = useState({ x: 50, y: 50 });
   const [isHovering, setIsHovering] = useState(false);
 
+  // Safely check for video extensions
   const isVideo = photoUrl && (photoUrl.endsWith('.mp4') || photoUrl.endsWith('.webm') || photoUrl.endsWith('.mov'));
 
   // --- BULLETPROOF PARALLEL THEME ENGINE ---
@@ -48,7 +48,7 @@ export default function PlayerIntroCard({
       frameClass: "from-red-800 via-stone-900 to-black border-red-600",
       stampClass: "from-slate-300 via-slate-100 to-slate-400",
       stampTextClass: "text-slate-800",
-      stampText: `${serialNumber} OF 5`,
+      stampText: `${serialNumber || 'X'} OF 5`,
       badgeColor: "bg-red-500/10 text-red-400 border-red-500/30"
     },
     '/10': {
@@ -58,7 +58,7 @@ export default function PlayerIntroCard({
       frameClass: "from-blue-700 via-slate-900 to-blue-950 border-blue-500",
       stampClass: "from-amber-600 via-amber-700 to-amber-900",
       stampTextClass: "text-amber-100",
-      stampText: `${serialNumber} OF 10`,
+      stampText: `${serialNumber || 'X'} OF 10`,
       badgeColor: "bg-blue-500/10 text-blue-400 border-blue-500/30"
     },
     'Base': {
@@ -73,7 +73,7 @@ export default function PlayerIntroCard({
     }
   };
 
-  const activeTheme = themesCatalog[parallel] || themesCatalog['Base'] || themesCatalog['1/1'];
+  const activeTheme = themesCatalog[parallel] || themesCatalog['Base'];
 
   // --- 3D TILT ENGINE ---
   const handleMouseMove = (e) => {
@@ -178,12 +178,16 @@ export default function PlayerIntroCard({
                       isVideo ? (
                         <video 
                           src={photoUrl} 
-                          autoPlay 
                           loop 
                           muted 
                           playsInline
-                          // object-contain fully fits widescreen frames; z-0 positions canvas correctly at base background level
-                          className="w-full h-full object-contain relative z-0 contrast-[1.05] saturate-110"
+                          preload="metadata" // 🎯 Keeps Admin console fast
+                          ref={(el) => {
+                            if (el) {
+                              isHovering ? el.play().catch(()=>{}) : el.pause();
+                            }
+                          }}
+                          className={`w-full h-full object-cover relative z-0 contrast-[1.05] saturate-110 transition-opacity duration-500 ${isHovering ? 'opacity-100' : 'opacity-80'}`}
                         />
                       ) : (
                         <img src={photoUrl} alt={playerName} className="w-full h-full object-cover object-top contrast-[1.05] saturate-110" />
@@ -195,14 +199,15 @@ export default function PlayerIntroCard({
                       </div>
                     )}
                     
-                    {/* z-10 mask seals borders nicely around the non-cropped video frame layers */}
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20 pointer-events-none z-10"></div>
                   </div>
                 </div>
 
-                <div className="absolute -bottom-2 right-4 bg-yellow-500 text-black px-2.5 py-0.5 rounded-sm text-[9px] font-black uppercase tracking-wider transform rotate-1 shadow-lg border border-yellow-400 z-30">
-                  "{nickname}"
-                </div>
+                {nickname && (
+                  <div className="absolute -bottom-2 right-4 bg-yellow-500 text-black px-2.5 py-0.5 rounded-sm text-[9px] font-black uppercase tracking-wider transform rotate-1 shadow-lg border border-yellow-400 z-30">
+                    "{nickname}"
+                  </div>
+                )}
               </div>
 
               <div className="w-full space-y-2 pb-1 z-20">
@@ -267,7 +272,9 @@ export default function PlayerIntroCard({
                  </div>
                  <div className="text-right">
                    <div className="text-slate-500 font-black text-[6px] uppercase tracking-widest">Player Dossier</div>
-                   <div className="text-slate-200 font-black text-[10px] tracking-widest">REG-ID #{playerName.replace(/\s+/g, '').substring(0,4).toUpperCase()}</div>
+                   <div className="text-slate-200 font-black text-[10px] tracking-widest">
+                     REG-ID #{playerName.replace(/\s+/g, '').substring(0,4).toUpperCase()}
+                   </div>
                  </div>
               </div>
               

@@ -25,8 +25,9 @@ export default function AdminConsoleView({ isOpen, onBack }) {
           .select('*')
           .order('name');
 
-        const { data: profileData } = await supabase
-          .from('profiles') 
+        // 🎯 FIXED: Changed 'profiles' to 'players' to get the actual golf stats
+        const { data: playerData } = await supabase
+          .from('players') 
           .select('*')
           .order('name');
 
@@ -45,7 +46,7 @@ export default function AdminConsoleView({ isOpen, onBack }) {
           .limit(10);
 
         setAchievements(achData || []);
-        setAllPlayers(profileData || []);
+        setAllPlayers(playerData || []);
         setRecentUnlocks(rawUnlocks || []);
 
         if (cardData) {
@@ -71,22 +72,23 @@ export default function AdminConsoleView({ isOpen, onBack }) {
 
   // --- DYNAMIC VIDEO RESOLUTION ENGINE ---
   const resolvePlayerVideoPath = (fullName) => {
-    if (!fullName) return '/foresv-logo.png'; // Fallback asset if name is missing
+    if (!fullName) return '/fores-v-logo.png'; 
     
     const cleanName = fullName.trim().toLowerCase();
 
-    // 1. Explicit Edge-Case Exception Routing
     if (cleanName === 'mike ross') {
-      return '/ross.mp4';   // Last name rule
+      return '/ross.mp4';   
     }
     if (cleanName === 'kevin larson') {
-      return '/kevlar.mp4'; // Nickname code rule
+      return '/kevlar.mp4';
     }
+    if (cleanName.includes('dirty')) {
+	return '/dan.mp4'
+   }
     if (cleanName === 'billy presson') {
-      return '/wpiv.mp4';   // Custom alias rule
+      return '/wpiv.mp4';   
     }
 
-    // 2. Default Baseline Rule: Pull first name up to space boundary
     const firstName = cleanName.split(' ')[0];
     return `/${firstName}.mp4`;
   };
@@ -179,19 +181,18 @@ export default function AdminConsoleView({ isOpen, onBack }) {
                           </span>
                           <PlayerIntroCard 
                             playerName={usr.name}
-                            nickname={usr.nickname || "Clubhouse Legend"}
                             
-                            // WIRED: Passes the parsed public folder video path straight into the display frame
+                            // 🎯 FIXED: Stripped out hardcoded fallbacks to use the live DB values
+                            nickname={usr.nickname} 
                             photoUrl={resolvePlayerVideoPath(usr.name)}
-                            
-                            handicap={usr.handicap || usr.trip_handicap || "0.0"}
+                            handicap={usr.handicap || "0.0"}
                             archetype={usr.archetype || "Golfer"}
-			    playerTeam={usr.team || "Independent"}
-                            drivingDist={usr.driving_dist || 250}
-                            girPercentage={usr.gir_percentage || 50}
-                            avgPutts={usr.avg_putts || 2.0}
-                            powerRating={usr.power_rating || 70}
-                            shortGameRating={usr.short_game_rating || 70}
+                            playerTeam={usr.team || "Independent"}
+                            drivingDist={usr.driving_dist}
+                            girPercentage={usr.gir_percentage}
+                            avgPutts={usr.avg_putts}
+                            powerRating={usr.power_rating}
+                            shortGameRating={usr.short_game_rating}
                             scoutingReport={usr.scouting_report || "Official league dossier analysis logged."}
                             parallel="Base"
                             serialNumber="#TOUR"
