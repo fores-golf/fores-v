@@ -19,6 +19,10 @@ export default function GarageView({ isOpen, onBack }) {
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
 
+  // --- DRAG AND DROP STATE ---
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
   // Sync initial hometown load to the search bar
   useEffect(() => {
     if (hometown) setSearchQuery(hometown);
@@ -41,13 +45,12 @@ export default function GarageView({ isOpen, onBack }) {
       } else {
         setSearchResults([]);
       }
-    }, 400); // Wait 400ms after they stop typing before hitting the API
+    }, 400);
 
     return () => clearTimeout(delayDebounceFn);
   }, [searchQuery, hometown, showDropdown]);
 
   const handleSelectLocation = (loc) => {
-    // Format perfectly for the database: "City, State, Country"
     const formattedLocation = `${loc.name}, ${loc.admin1 || loc.country}`;
     setHometown(formattedLocation);
     setSearchQuery(formattedLocation);
@@ -78,9 +81,76 @@ export default function GarageView({ isOpen, onBack }) {
     const newClub = { 
       id: `club-${Date.now()}`, 
       name: '', 
-      distance: 100 
+      distance: 100,
+      customRank: 999000 + bag.length // Default to the bottom, just above Putter
     };
     setBag([...bag, newClub]);
+  };
+
+  // --- SORTING ENGINE (FRACTIONAL INDEXING) ---
+  const getSortValue = (club) => {
+    const isStandard = CLUB_OPTIONS.includes(club.name) && club.name !== 'Custom' && club.name !== '';
+    if (isStandard) {
+      return CLUB_OPTIONS.indexOf(club.name) * 1000;
+    }
+    // If it's a custom club, rely on its saved fractional rank
+    return club.customRank !== undefined ? club.customRank : 999000;
+  };
+
+  const sortedBag = [...bag].sort((a, b) => {
+    // 1. Absolute Rule: Putter is ALWAYS the last item, period.
+    if (a.name === 'Putter' && b.name !== 'Putter') return 1;
+    if (b.name === 'Putter' && a.name !== 'Putter') return -1;
+
+    // 2. Standard Fractional Sort
+    const valA = getSortValue(a);
+    const valB = getSortValue(b);
+    
+    // Tiebreaker just in case two custom clubs share the exact same rank
+    if (valA === valB) return a.id.localeCompare(b.id);
+    return valA - valB;
+  });
+
+  // --- DRAG AND DROP HANDLERS ---
+  const handleDragStart = (e, club) => {
+    setDraggedId(club.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, id) => {
+    e.preventDefault(); // Required to allow dropping
+    if (draggedId && draggedId !== id) {
+      setDragOverId(id);
+    }
+  };
+
+  const handleDrop = (e, targetId) => {
+    e.preventDefault();
+    setDragOverId(null);
+
+    if (!draggedId || draggedId === targetId) return;
+
+    const draggedIdx = sortedBag.findIndex(c => c.id === draggedId);
+    const targetIdx = sortedBag.findIndex(c => c.id === targetId);
+
+    let prevRank, nextRank;
+
+    // Calculate midpoint between the surrounding clubs based on drag direction
+    if (draggedIdx < targetIdx) {
+      // Dragged down
+      prevRank = getSortValue(sortedBag[targetIdx]);
+      nextRank = targetIdx + 1 < sortedBag.length ? getSortValue(sortedBag[targetIdx + 1]) : prevRank + 1000;
+    } else {
+      // Dragged up
+      nextRank = getSortValue(sortedBag[targetIdx]);
+      prevRank = targetIdx - 1 >= 0 ? getSortValue(sortedBag[targetIdx - 1]) : nextRank - 1000;
+    }
+
+    const newRank = (prevRank + nextRank) / 2;
+
+    // Update the custom club's rank in the master bag state
+    setBag(bag.map(c => c.id === draggedId ? { ...c, customRank: newRank } : c));
+    setDraggedId(null);
   };
 
   if (loading) return null;
@@ -121,7 +191,7 @@ export default function GarageView({ isOpen, onBack }) {
 
       <main className="p-5 flex flex-col gap-6 max-w-md mx-auto relative z-0">
         
-        {/* --- ENVIRONMENTAL CALIBRATION (Now with Autocomplete) --- */}
+        {/* --- ENVIRONMENTAL CALIBRATION --- */}
         <div className="bg-gradient-to-br from-[#1e293b] to-[#0f172a] rounded-3xl p-5 border border-white/5 relative overflow-visible shadow-2xl">
           <div className="absolute right-0 top-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none"></div>
           <div className="flex items-center gap-3 mb-3 relative z-10">
@@ -146,7 +216,7 @@ export default function GarageView({ isOpen, onBack }) {
                   setShowDropdown(true);
                 }}
                 onFocus={() => setShowDropdown(true)}
-                onBlur={() => setTimeout(() => setShowDropdown(false), 200)} // Delay so clicks register
+                onBlur={() => setTimeout(() => setShowDropdown(false), 200)}
                 placeholder="Search City (e.g., Denver, CO)"
                 className="w-full bg-black/40 rounded-xl border border-white/5 p-3.5 pl-10 text-sm font-semibold text-white placeholder-slate-600 focus:outline-none focus:border-blue-500/50 transition-colors"
               />
@@ -172,7 +242,6 @@ export default function GarageView({ isOpen, onBack }) {
                       <span className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">{loc.name}</span>
                       <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">{loc.admin1}, {loc.country_code}</span>
                     </div>
-                    {/* Convert meters to feet for US standard golf metrics */}
                     {loc.elevation && (
                       <span className="text-[10px] font-black text-slate-400 bg-black/30 px-2 py-1 rounded-lg border border-white/5">
                         {Math.round(loc.elevation * 3.28084).toLocaleString()} FT
@@ -195,16 +264,34 @@ export default function GarageView({ isOpen, onBack }) {
           </div>
 
           <div className="flex flex-col gap-3">
-            {bag.map((club) => {
-              const isStandard = CLUB_OPTIONS.includes(club.name);
+            {/* Iterating over the SORTED array so visual updates are instant */}
+            {sortedBag.map((club) => {
+              const isStandard = CLUB_OPTIONS.includes(club.name) && club.name !== '' && club.name !== 'Custom';
               
               return (
                 <div 
                   key={club.id} 
-                  className="bg-[#121827] border border-white/5 rounded-2xl p-4 flex flex-col gap-3 shadow-md group hover:border-white/10 transition-colors"
+                  draggable={!isStandard}
+                  onDragStart={(e) => handleDragStart(e, club)}
+                  onDragOver={(e) => handleDragOver(e, club.id)}
+                  onDragLeave={() => setDragOverId(null)}
+                  onDrop={(e) => handleDrop(e, club.id)}
+                  className={`bg-[#121827] border rounded-2xl p-4 flex flex-col gap-3 shadow-md group transition-all duration-200 ${
+                    dragOverId === club.id ? 'border-[#34d399] bg-[#34d399]/5 scale-[1.02]' : 'border-white/5 hover:border-white/10'
+                  } ${draggedId === club.id ? 'opacity-40 scale-95' : 'opacity-100'}`}
                 >
                   <div className="flex justify-between items-center">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
+                      
+                      {/* Drag Handle Icon - Only shows on Custom clubs */}
+                      {!isStandard && (
+                        <div className="cursor-grab active:cursor-grabbing text-slate-600 hover:text-white transition-colors">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8h16M4 16h16" />
+                          </svg>
+                        </div>
+                      )}
+
                       <button 
                         onClick={() => handleDeleteClub(club.id)}
                         className="opacity-50 hover:opacity-100 text-red-400 p-1 rounded-lg hover:bg-red-500/10 transition-all active:scale-95"
@@ -223,7 +310,6 @@ export default function GarageView({ isOpen, onBack }) {
                           onChange={(e) => handleUpdateField(club.id, 'name', e.target.value)}
                           placeholder="Custom Club"
                           className="bg-transparent border-b border-[#34d399]/40 focus:border-[#34d399] font-black tracking-tight text-slate-100 text-lg focus:outline-none w-32 transition-colors placeholder:text-slate-600 pb-0.5"
-                          autoFocus
                         />
                       )}
                     </div>
@@ -247,23 +333,16 @@ export default function GarageView({ isOpen, onBack }) {
                     {club.name !== 'Putter' ? (
                       <div className="flex items-center gap-3 bg-black/30 rounded-xl px-3 py-1.5 border border-white/5 focus-within:border-[#34d399]/40 transition-colors w-28">
                         <input 
-  type="number"
-  // FIX 1: If the distance is 0, show an empty string so the input box is completely clean
-  value={club.distance === 0 ? '' : club.distance}
-  
-  onChange={(e) => {
-    const rawValue = e.target.value;
-    
-    // FIX 2: Strip out any leading zeros if they type something like "0250"
-    // This turns "0250" into a clean integer 250 instantly
-    const parsedValue = rawValue === '' ? 0 : parseInt(rawValue, 10);
-    
-    handleUpdateField(club.id, 'distance', parsedValue);
-  }}
-  // Use your placeholder to show a clean baseline hint instead of a sticky 0
-  placeholder="0"
-  className="w-full bg-transparent border-none text-right font-black text-white focus:outline-none text-lg tabular-nums"
-/>
+                          type="number"
+                          value={club.distance === 0 ? '' : club.distance}
+                          onChange={(e) => {
+                            const rawValue = e.target.value;
+                            const parsedValue = rawValue === '' ? 0 : parseInt(rawValue, 10);
+                            handleUpdateField(club.id, 'distance', parsedValue);
+                          }}
+                          placeholder="0"
+                          className="w-full bg-transparent border-none text-right font-black text-white focus:outline-none text-lg tabular-nums"
+                        />
                         <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Yds</span>
                       </div>
                     ) : (
