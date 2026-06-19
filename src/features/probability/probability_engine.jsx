@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, CalendarClock } from 'lucide-react';
 import { supabase } from '../../config/supabaseClient';
-// 🎯 Import the handicap math engine we just built!
 import { calculatePlayingHandicaps } from '../../utils/matchPlayEngine';
 
 // Helper: Calculate net score for a simulated hole
@@ -23,10 +22,13 @@ const getVegasScore = (net1, net2) => {
 const simulateGross = (player, hole) => {
   if (!player) return null;
   
-  let expectedGross = hole.par + ((player.handicap || 0) / 18);
+  // 🎯 FIX: Explicitly parse handicap to an integer so the math doesn't break
+  const hcp = parseInt(player.handicap, 10) || 0;
+  
+  let expectedGross = hole.par + (hcp / 18);
   if (hole.par === 5 && player.power_rating > 80) expectedGross -= 0.15;
   
-  const stdev = 0.8 + ((player.handicap || 0) * 0.05) - (player.short_game_rating > 70 ? 0.2 : 0);
+  const stdev = 0.8 + (hcp * 0.05) - (player.short_game_rating > 70 ? 0.2 : 0);
   const variance = (Math.random() + Math.random() + Math.random() - 1.5) * stdev;
   
   return Math.max(1, Math.round(expectedGross + variance));
@@ -134,34 +136,39 @@ const useMatchData = (matchId, status) => {
           .single();
         if (matchError) throw matchError;
 
-        // 2. Fetch all profiles attached to this match
-        const playerIds = [
-          match.team1_player1, match.team1_player2, 
-          match.team2_player1, match.team2_player2
-        ].filter(Boolean);
-
+        // 2. 🎯 FIX: Fetch profiles universally so we capture both auth_id and id for the mapping tool
         const { data: profiles, error: profileError } = await supabase
           .from('players')
-          .select('id, name, handicap, power_rating, short_game_rating')
-          .in('id', playerIds);
+          .select('id, auth_id, name, handicap, power_rating, short_game_rating');
+          
         if (profileError) throw profileError;
+
+        // 🎯 FIX: The universal lookup tool, checking auth_id first
+        const resolveGolfer = (refId) => {
+          if (!refId) return null;
+          const target = String(refId).trim().toLowerCase();
+          return profiles.find(p => 
+            (p.auth_id && String(p.auth_id).trim().toLowerCase() === target) || 
+            (p.id && String(p.id).trim().toLowerCase() === target)
+          );
+        };
 
         // Map players
         const players = {
-          t1p1: profiles.find(p => p.id === match.team1_player1),
-          t1p2: profiles.find(p => p.id === match.team1_player2),
-          t2p1: profiles.find(p => p.id === match.team2_player1),
-          t2p2: profiles.find(p => p.id === match.team2_player2),
+          t1p1: resolveGolfer(match.team1_player1),
+          t1p2: resolveGolfer(match.team1_player2),
+          t2p1: resolveGolfer(match.team2_player1),
+          t2p2: resolveGolfer(match.team2_player2),
         };
 
-        // 3. Format arrays for the Handicap Engine
+        // 3. Format arrays for the Handicap Engine with explicit integer parsing
         const team1Arr = [];
-        if (players.t1p1) team1Arr.push({ id: 't1p1', courseHandicap: players.t1p1.handicap });
-        if (players.t1p2) team1Arr.push({ id: 't1p2', courseHandicap: players.t1p2.handicap });
+        if (players.t1p1) team1Arr.push({ id: 't1p1', courseHandicap: parseInt(players.t1p1.handicap, 10) || 0 });
+        if (players.t1p2) team1Arr.push({ id: 't1p2', courseHandicap: parseInt(players.t1p2.handicap, 10) || 0 });
         
         const team2Arr = [];
-        if (players.t2p1) team2Arr.push({ id: 't2p1', courseHandicap: players.t2p1.handicap });
-        if (players.t2p2) team2Arr.push({ id: 't2p2', courseHandicap: players.t2p2.handicap });
+        if (players.t2p1) team2Arr.push({ id: 't2p1', courseHandicap: parseInt(players.t2p1.handicap, 10) || 0 });
+        if (players.t2p2) team2Arr.push({ id: 't2p2', courseHandicap: parseInt(players.t2p2.handicap, 10) || 0 });
 
         const format = match.format || '1v1';
         const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);

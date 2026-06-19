@@ -25,54 +25,114 @@ export default function MatchScreen({ matchId, onBack }) {
   const [matchInsights, setMatchInsights] = useState({});
   const [playerSlot, setPlayerSlot] = useState(null); 
 
-  // --- NEW: INDIVIDUAL LOCK STATE ---
   const [isMyRoundComplete, setIsMyRoundComplete] = useState(false);
+  const [calculatedStrokes, setCalculatedStrokes] = useState({ text: 'Syncing Engine...', color: 'text-slate-500 border-white/5 bg-white/5' });
 
-  // 1. FETCH MATCH INSIGHTS & DETERMINE PLAYER SLOT
   useEffect(() => {
     if (!matchId || !player?.id) return;
 
     async function fetchLiveInsights() {
       try {
-        const { data, error } = await supabase
+        const { data: match, error: matchError } = await supabase
           .from('matches')
           .select('*')
           .eq('id', matchId)
           .single();
 
-        if (!error && data) {
-          let slot = null;
-          if (player.id === data.team1_player1) slot = 'slanted_a';
-          else if (player.id === data.team1_player2) slot = 'slanted_b';
-          else if (player.id === data.team2_player1) slot = 'brothelmen_a';
-          else if (player.id === data.team2_player2) slot = 'brothelmen_b';
-          
-          setPlayerSlot(slot);
+        if (matchError || !match) throw matchError;
 
-          setMatchInsights({
-            matchupId: matchId,
-            status: `${data.team1_score || 0} vs ${data.team2_score || 0}`,
-            wagerStatus: (data.format || 'LIVE').toUpperCase(),
-            team1Handicap: data.team1_playing_handicap,
-            team2Handicap: data.team2_playing_handicap,
-            team1Name: data.team1_player1,
-            team2Name: data.team2_player1,
-            t1p1: data.team1_player1,
-            t1p2: data.team1_player2,
-            t2p1: data.team2_player1,
-            t2p2: data.team2_player2,
-          });
+        // 🎯 CORE FIX: Checks player.id OR player.auth_id aggressively against the match fields
+        const isMe = (refId) => {
+           if (!refId) return false;
+           const target = String(refId).trim().toLowerCase();
+           return (player.auth_id && String(player.auth_id).trim().toLowerCase() === target) ||
+                  (player.id && String(player.id).trim().toLowerCase() === target);
+        };
+
+        let slot = null;
+        if (isMe(match.team1_player1)) slot = 'slanted_a';
+        else if (isMe(match.team1_player2)) slot = 'slanted_b';
+        else if (isMe(match.team2_player1)) slot = 'brothelmen_a';
+        else if (isMe(match.team2_player2)) slot = 'brothelmen_b';
+        
+        setPlayerSlot(slot);
+
+        // Fetch live profiles and explicitly pull name and auth_id
+        const { data: profiles } = await supabase.from('players').select('id, auth_id, name, handicap');
+
+        const getProfile = (refId) => {
+          if (!refId || !profiles) return null;
+          const target = String(refId).trim().toLowerCase();
+          return profiles.find(p => 
+            (p.auth_id && String(p.auth_id).trim().toLowerCase() === target) ||
+            (p.id && String(p.id).trim().toLowerCase() === target)
+          );
+        };
+
+        const p1 = getProfile(match.team1_player1);
+        const p2 = getProfile(match.team1_player2);
+        const p3 = getProfile(match.team2_player1);
+        const p4 = getProfile(match.team2_player2);
+
+        const format = match.format || '1v1';
+        
+        // 🎯 MAP NAMES DIRECTLY INTO INSIGHTS INSTEAD OF UUIDS
+        setMatchInsights({
+          matchupId: matchId,
+          status: `${match.team1_score || 0} vs ${match.team2_score || 0}`,
+          wagerStatus: format.toUpperCase(),
+          matchState: match.status,
+          team1Name: p1 ? p1.name : 'TBD',
+          team2Name: p3 ? p3.name : 'TBD',
+          t1p1: p1 ? p1.id : null,
+          t1p2: p2 ? p2.id : null,
+          t2p1: p3 ? p3.id : null,
+          t2p2: p4 ? p4.id : null,
+        });
+
+        if (profiles && profiles.length > 0) {
+          const team1Arr = [];
+          if (p1) team1Arr.push({ id: 't1p1', courseHandicap: parseInt(p1.handicap, 10) || 0 });
+          if (p2) team1Arr.push({ id: 't1p2', courseHandicap: parseInt(p2.handicap, 10) || 0 });
+
+          const team2Arr = [];
+          if (p3) team2Arr.push({ id: 't2p1', courseHandicap: parseInt(p3.handicap, 10) || 0 });
+          if (p4) team2Arr.push({ id: 't2p2', courseHandicap: parseInt(p4.handicap, 10) || 0 });
+
+          const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
+
+          if (handicapData.type === 'team') {
+            if (handicapData.team1Strokes > 0) {
+              setCalculatedStrokes({ text: `Clams getting ${handicapData.team1Strokes} strokes`, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5' });
+            } else if (handicapData.team2Strokes > 0) {
+              setCalculatedStrokes({ text: `Brothelmen getting ${handicapData.team2Strokes} strokes`, color: 'text-red-400 border-red-500/20 bg-red-500/5' });
+            } else {
+              setCalculatedStrokes({ text: 'Heads Up (Scratch)', color: 'text-slate-400 border-white/5 bg-white/5' });
+            }
+          } else {
+            const t1Max = handicapData.team1 ? Math.max(...Object.values(handicapData.team1), 0) : 0;
+            const t2Max = handicapData.team2 ? Math.max(...Object.values(handicapData.team2), 0) : 0;
+            if (t1Max > t2Max) {
+              setCalculatedStrokes({ text: `Clams getting up to ${t1Max} strokes`, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5' });
+            } else if (t2Max > t1Max) {
+              setCalculatedStrokes({ text: `Brothelmen getting up to ${t2Max} strokes`, color: 'text-red-400 border-red-500/20 bg-red-500/5' });
+            } else {
+              setCalculatedStrokes({ text: 'Match is Scratch', color: 'text-slate-400 border-white/5 bg-white/5' });
+            }
+          }
         }
       } catch (err) {
-        console.warn('Insights update failed:', err.message);
+        console.warn('Insights background engine calculation skipped:', err.message);
       }
     }
     fetchLiveInsights();
   }, [matchId, player?.id]);
 
-  // 2. SMART RESUME & INDIVIDUAL LOCK DETECTION
   useEffect(() => {
-    if (!matchId || !playerSlot) return;
+    if (!matchId || !playerSlot) {
+      setIsInitializing(false);
+      return;
+    }
 
     async function determineStartingHole() {
       try {
@@ -84,10 +144,9 @@ export default function MatchScreen({ matchId, onBack }) {
         if (!error && data) {
           const scoredHoles = data.filter(d => d[`score_${playerSlot}`] !== null).map(d => d.hole_number);
           
-          // Check if this specific player has logged all 18 holes
           if (scoredHoles.length >= 18) {
             setIsMyRoundComplete(true);
-            setCurrentHole(18); // Default their view to the 18th hole
+            setCurrentHole(18);
           } else {
             let firstUnscored = 1;
             while (scoredHoles.includes(firstUnscored) && firstUnscored < 18) {
@@ -105,7 +164,6 @@ export default function MatchScreen({ matchId, onBack }) {
     determineStartingHole();
   }, [matchId, playerSlot]);
 
-  // 3. FETCH ACTIVE HOLE GPS
   useEffect(() => {
     if (isInitializing) return;
 
@@ -144,7 +202,6 @@ export default function MatchScreen({ matchId, onBack }) {
     fetchHole();
   }, [currentHole, isInitializing]);
 
-  // 4. FETCH EXISTING SCORE
   useEffect(() => {
     if (!activeHoleData?.id || !matchId || !playerSlot) {
       setCurrentScoreData(null);
@@ -179,10 +236,6 @@ export default function MatchScreen({ matchId, onBack }) {
     fetchExistingScore();
   }, [activeHoleData, matchId, playerSlot]);
 
-
-  // ==========================================
-  // 🏆 MASTER SCORE SAVE & EVALUATION ENGINE 🏆
-  // ==========================================
   const handleScoreSave = async (scoreData) => {
     if (!activeHoleData || !matchId || !playerSlot) {
       alert('Missing validation markers. Cannot save score.');
@@ -219,43 +272,43 @@ export default function MatchScreen({ matchId, onBack }) {
       drinks: scoreData.drinks
     });
 
-    // ---------------------------------------------------------
-    // ⚙️ BACKGROUND PROCESS: RUN THE MATCH PLAY ENGINE
-    // ---------------------------------------------------------
     try {
-      const { data: allHoles } = await supabase
-        .from('holes')
-        .select('id, hole_number, hcp_index')
-        .eq('course_id', activeHoleData.course_id || 1);
+      const { data: allHoles } = await supabase.from('holes').select('id, hole_number, hcp_index').eq('course_id', activeHoleData.course_id || 1);
+      const { data: allMatchScores } = await supabase.from('hole_scores').select('*').eq('matchup_id', matchId);
+      const { data: liveProfiles } = await supabase.from('players').select('id, auth_id, handicap');
 
-      const { data: allMatchScores } = await supabase
-        .from('hole_scores')
-        .select('*')
-        .eq('matchup_id', matchId);
+      if (liveProfiles) {
+        const findHcp = (refId) => {
+          const found = liveProfiles.find(p => String(p.auth_id) === String(refId) || String(p.id) === String(refId));
+          return found ? parseInt(found.handicap, 10) || 0 : 0;
+        };
 
-      const mockTeam1 = [{ id: 't1p1', courseHandicap: 10 }, { id: 't1p2', courseHandicap: 15 }];
-      const mockTeam2 = [{ id: 't2p1', courseHandicap: 8 }, { id: 't2p2', courseHandicap: 18 }];
+        const activeTeam1 = [];
+        if (matchInsights.t1p1) activeTeam1.push({ id: 't1p1', courseHandicap: findHcp(matchInsights.t1p1) });
+        if (matchInsights.t1p2) activeTeam1.push({ id: 't1p2', courseHandicap: findHcp(matchInsights.t1p2) });
 
-      const format = matchInsights.wagerStatus || '1V1';
-      const handicapData = calculatePlayingHandicaps(format, mockTeam1, mockTeam2);
-      const matchResult = evaluateMatchStatus(format, handicapData, allHoles || [], allMatchScores || []);
+        const activeTeam2 = [];
+        if (matchInsights.t2p1) activeTeam2.push({ id: 't2p1', courseHandicap: findHcp(matchInsights.t2p1) });
+        if (matchInsights.t2p2) activeTeam2.push({ id: 't2p2', courseHandicap: findHcp(matchInsights.t2p2) });
 
-      // 🎯 UPDATED: We only update the scores now. We purposefully do NOT update 
-      // the status to 'completed' here so that the match stays live for everyone else.
-      await supabase
-        .from('matches')
-        .update({
-          team1_score: matchResult.team1Wins,
-          team2_score: matchResult.team2Wins
-        })
-        .eq('id', matchId);
+        const format = matchInsights.wagerStatus || '1V1';
+        const handicapData = calculatePlayingHandicaps(format, activeTeam1, activeTeam2);
+        const matchResult = evaluateMatchStatus(format, handicapData, allHoles || [], allMatchScores || []);
 
-      setMatchInsights(prev => ({
-        ...prev,
-        status: `${matchResult.team1Wins} vs ${matchResult.team2Wins}`
-      }));
+        await supabase
+          .from('matches')
+          .update({
+            team1_score: matchResult.team1Wins,
+            team2_score: matchResult.team2Wins
+          })
+          .eq('id', matchId);
 
-      // Check if this was their 18th hole saved
+        setMatchInsights(prev => ({
+          ...prev,
+          status: `${matchResult.team1Wins} vs ${matchResult.team2Wins}`
+        }));
+      }
+
       const myScoresCount = allMatchScores.filter(s => s[`score_${playerSlot}`] !== null).length;
       if (myScoresCount >= 18 || (currentHole === 18 && myScoresCount === 17)) {
         setIsMyRoundComplete(true);
@@ -265,30 +318,7 @@ export default function MatchScreen({ matchId, onBack }) {
       console.error("Match Play Engine failed:", engineError);
     }
 
-    // ---------------------------------------------------------
-    // 🃏 ADVANCE LOGIC
-    // ---------------------------------------------------------
-    if (ENABLE_CARD_MINTING) {
-      let matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
-      if (!matchedCardConfig) matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
-      if (!matchedCardConfig) matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
-
-      if (matchedCardConfig) {
-        const completePayload = {
-          ...matchedCardConfig,
-          player: player.name || 'Clubhouse Golfer',
-          earnedByUserId: player.id,
-          hole: currentHole,
-          courseName: "Fores V Master Course"
-        };
-        setMintPayload(completePayload);
-        setIsMintingActive(true);
-      } else {
-        if (currentHole < 18) setCurrentHole(prev => prev + 1);
-      }
-    } else {
-      if (currentHole < 18) setCurrentHole(prev => prev + 1);
-    }
+    if (currentHole < 18) setCurrentHole(prev => prev + 1);
   };
 
   const handleExitClick = (e) => {
@@ -296,97 +326,44 @@ export default function MatchScreen({ matchId, onBack }) {
     if (typeof onBack === 'function') onBack();
   };
 
+  if (matchInsights.matchState === 'scheduled' && !playerSlot && !isInitializing) {
+    return (
+      <div className="flex flex-col h-[100dvh] bg-slate-950 text-white font-sans items-center justify-center p-6 relative z-50">
+        <button onClick={handleExitClick} className="absolute top-6 left-6 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl hover:bg-white/10 transition-all active:scale-95 flex items-center gap-1">◀ Back</button>
+        <div className="w-20 h-20 bg-blue-500/10 border border-blue-500/20 rounded-3xl flex items-center justify-center mb-6 shadow-[0_0_30px_rgba(59,130,246,0.15)]">
+          <svg className="w-10 h-10 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+        </div>
+        <h1 className="text-3xl font-black italic uppercase tracking-tight mb-3 text-center bg-gradient-to-br from-white to-slate-500 bg-clip-text text-transparent">Match Preview</h1>
+        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest text-center max-w-[250px] leading-relaxed">Tee time approaches. Tale of the tape and pre-match analytics will live here.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-[100dvh] bg-slate-950 text-white font-sans overflow-hidden antialiased fixed inset-0 z-50">
-      
-      {/* 🎯 NEW: ROUND COMPLETE BANNER */}
-      {isMyRoundComplete && (
-        <div className="bg-[#34d399] text-black text-center py-1.5 px-4 text-[10px] font-black uppercase tracking-widest z-[99999] relative shrink-0 shadow-md">
-          Your Round is Complete & Locked. Waiting on other players.
-        </div>
-      )}
-
-      {/* HUD HEADER */}
+      {isMyRoundComplete && <div className="bg-[#34d399] text-black text-center py-1.5 px-4 text-[10px] font-black uppercase tracking-widest z-[99999] relative shrink-0 shadow-md">Your Round is Complete & Locked. Waiting on other players.</div>}
       <header className={`absolute ${isMyRoundComplete ? 'top-10' : 'top-4'} left-4 right-4 bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-2xl flex justify-between items-center px-4 py-2 z-[9999] shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all`}>
         <div className="flex items-center gap-2">
-          <button 
-            onClick={handleExitClick}
-            className="text-[10px] font-black uppercase tracking-wider text-red-400 bg-red-500/5 border border-red-500/20 px-2.5 h-8 rounded-xl flex items-center justify-center gap-1 hover:bg-red-500/10 transition-all active:scale-95 cursor-pointer"
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
-            Exit
-          </button>
-          
-          <button 
-            onClick={() => setCurrentHole(Math.max(1, currentHole - 1))}
-            disabled={currentHole === 1 || isInitializing}
-            className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-8 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer"
-          >◀</button>
+          <button onClick={handleExitClick} className="text-[10px] font-black uppercase tracking-wider text-red-400 bg-red-500/5 border border-red-500/20 px-2.5 h-8 rounded-xl flex items-center justify-center gap-1 hover:bg-red-500/10 transition-all active:scale-95 cursor-pointer"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>Exit</button>
+          <button onClick={() => setCurrentHole(Math.max(1, currentHole - 1))} disabled={currentHole === 1 || isInitializing} className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-8 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer">◀</button>
         </div>
-        
         <div className="text-center flex flex-col items-center justify-center select-none">
           <h1 className="text-base font-black tracking-widest text-slate-100 uppercase leading-none">Hole {currentHole}</h1>
           <div className="flex gap-1.5 mt-1 items-center">
-            <span className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-              PAR {par}
-            </span>
-            {currentScoreData?.gross_score && (
-              <span className="text-[9px] font-black text-amber-400 uppercase tracking-[0.2em] bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                SCORE: {currentScoreData.gross_score}
-              </span>
-            )}
+            <span className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">PAR {par}</span>
+            <span className={`text-[8px] font-black uppercase tracking-wider px-2 py-0.5 border rounded-md ${calculatedStrokes.color}`}>{calculatedStrokes.text}</span>
           </div>
         </div>
-        
-        <button 
-          onClick={() => setCurrentHole(Math.min(18, currentHole + 1))}
-          disabled={currentHole === 18 || isInitializing}
-          className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-10 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer"
-        >▶</button>
+        <button onClick={() => setCurrentHole(Math.min(18, currentHole + 1))} disabled={currentHole === 18 || isInitializing} className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-10 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer">▶</button>
       </header>
-
       <main className="flex-1 relative w-full h-full z-0 bg-slate-950">
          {isLoading || isInitializing || !activeHoleData ? (
-           <div className="h-full flex items-center justify-center text-slate-600 font-black animate-pulse uppercase tracking-[0.2em] text-xs">
-             Syncing Geospatial Arrays...
-           </div>
+           <div className="h-full flex items-center justify-center text-slate-600 font-black animate-pulse uppercase tracking-[0.2em] text-xs">Syncing Geospatial Arrays...</div>
          ) : (
-           <PremiumMapMatrix 
-             holeData={activeHoleData} 
-             insights={matchInsights} 
-             onLogScoreClick={() => {
-               // Prevent opening the score entry sheet if they are locked out
-               if (isMyRoundComplete) {
-                 alert("Your scorecard is locked for this round. Waiting on other players to finish.");
-               } else {
-                 setIsScoreSheetOpen(true);
-               }
-             }} 
-           />
+           <PremiumMapMatrix holeData={activeHoleData} insights={matchInsights} onLogScoreClick={() => { if (isMyRoundComplete) { alert("Your scorecard is locked for this round. Waiting on other players to finish."); } else { setIsScoreSheetOpen(true); } }} />
          )}
       </main>
-
-      <ScoreEntrySheet 
-        isOpen={isScoreSheetOpen} 
-        onClose={() => setIsScoreSheetOpen(false)} 
-        currentHole={currentHole}
-        par={par}
-        onSave={handleScoreSave}
-        existingData={currentScoreData} 
-      />
-
-      {isMintingActive && mintPayload && (
-        <CardMintingProtocol 
-          mintData={mintPayload}
-          onComplete={() => {
-            setIsMintingActive(false);
-            setMintPayload(null);
-            if (currentHole < 18) {
-              setCurrentHole(prev => prev + 1);
-            }
-          }}
-        />
-      )}
+      <ScoreEntrySheet isOpen={isScoreSheetOpen} onClose={() => setIsScoreSheetOpen(false)} currentHole={currentHole} par={par} onSave={handleScoreSave} existingData={currentScoreData} />
     </div>
   );
 }

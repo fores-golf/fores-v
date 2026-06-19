@@ -13,10 +13,11 @@ export function useScheduleData() {
     try {
       setLoading(true);
 
-      // 1. Fetch unconstrained master player list (Updated to 'players')
+      // 1. Fetch unconstrained master player list 
+      // 🎯 THE FIX: Added auth_id and handicap to the global context payload
       const { data: rosterData, error: rosterError } = await supabase
         .from('players')
-        .select('id, name, team')
+        .select('id, auth_id, name, team, handicap') 
         .order('name', { ascending: true });
       
       if (rosterError) throw rosterError;
@@ -32,9 +33,10 @@ export function useScheduleData() {
       if (scheduleError) throw scheduleError;
       setAllMatches(scheduleData || []);
 
-      // 3. Filter "My Matches" dynamically (UPDATED FOR ID MATCHING)
+      // 3. Filter "My Matches" dynamically
       if (player) {
         const safePlayerId = player.id ? String(player.id).trim().toLowerCase() : null;
+        const safePlayerAuthId = player.auth_id ? String(player.auth_id).trim().toLowerCase() : null;
         const safePlayerName = player.name ? String(player.name).trim().toLowerCase() : null;
 
         const filteredMyMatches = (scheduleData || []).filter(match => {
@@ -42,11 +44,14 @@ export function useScheduleData() {
             match.team1_player1, match.team1_player2,
             match.team2_player1, match.team2_player2
           ].filter(Boolean).map(p => {
-            const val = typeof p === 'object' ? (p.id || p.name) : p;
+            const val = typeof p === 'object' ? (p.id || p.auth_id || p.name) : p;
             return String(val).trim().toLowerCase();
           });
 
-          return matchParticipants.includes(safePlayerId) || matchParticipants.includes(safePlayerName);
+          // 🎯 FIX: Explicitly checks if the match row contains your auth_id, id, or name
+          return matchParticipants.includes(safePlayerId) || 
+                 matchParticipants.includes(safePlayerAuthId) || 
+                 matchParticipants.includes(safePlayerName);
         });
         
         setMyMatches(filteredMyMatches);
@@ -97,7 +102,7 @@ export function useScheduleData() {
     return () => {
       supabase.removeChannel(matchSubscription);
     };
-  }, [player?.id, player?.name]); // Added player.id to dependencies
+  }, [player?.id, player?.auth_id, player?.name]); // 🎯 Added auth_id to dependencies
 
   return { 
     allMatches, 
