@@ -27,6 +27,14 @@ export default function LeaderboardView({ onBack }) {
   const t1Pct = (standings.team1.score / standings.totalAvailablePoints) * 100;
   const t2Pct = (standings.team2.score / standings.totalAvailablePoints) * 100;
 
+  // --- 🎯 NEW: SORT ENGINE ---
+  // Forces 'live' matches to the top, then sorts the rest chronologically
+  const sortedMatchHistory = [...matchHistory].sort((a, b) => {
+    if (a.status === 'live' && b.status !== 'live') return -1;
+    if (b.status === 'live' && a.status !== 'live') return 1;
+    return a.round - b.round;
+  });
+
   return (
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
       
@@ -90,12 +98,12 @@ export default function LeaderboardView({ onBack }) {
               </h2>
 
               <div className="flex flex-col gap-3">
-                {matchHistory.length === 0 ? (
+                {sortedMatchHistory.length === 0 ? (
                   <div className="text-center p-8 bg-white/5 border border-white/5 rounded-2xl text-xs text-slate-500 italic">
                     No tournament pairings published yet.
                   </div>
                 ) : (
-                  matchHistory.map((match) => {
+                  sortedMatchHistory.map((match) => {
                     const roundMeta = ROUND_METADATA[match.round] || { date: 'TBD', course: 'TBD' };
 
                     return (

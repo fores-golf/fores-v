@@ -4,6 +4,15 @@ import { useScheduleData } from '../schedule/hooks/useScheduleData';
 import { useChirpsNotification } from '../chat/hooks/useChirpsNotifications';
 import { supabase } from '../../config/supabaseClient';
 
+// Metadata mapping for the time-lock engine
+const ROUND_METADATA = {
+  1: { parseDate: '2026-06-25' },
+  2: { parseDate: '2026-06-26' },
+  3: { parseDate: '2026-06-26' },
+  4: { parseDate: '2026-06-27' },
+  5: { parseDate: '2026-06-27' }
+};
+
 export default function DashboardView({ 
   onNavigateToProfile, 
   onNavigateToGarage, 
@@ -26,7 +35,7 @@ export default function DashboardView({
   // State to control the 3-second entrance animation for the dice icon
   const [animateDice, setAnimateDice] = useState(true);
 
-  // --- UPDATED: SPLASH SCREEN STATE (ONCE PER SESSION) ---
+  // --- SPLASH SCREEN STATE (ONCE PER SESSION) ---
   const [showSplash, setShowSplash] = useState(() => {
     // Check if they've already seen it this session
     return sessionStorage.getItem('fores_v_splash_seen') !== 'true';
@@ -78,6 +87,24 @@ export default function DashboardView({
     if (!identifier) return "TBD";
     const found = golfers.find(g => g.id === identifier);
     return found ? found.name : identifier; 
+  };
+
+  // --- TIME LOCK ENGINE ---
+  const isMatchReadyToStart = (round, teeTime) => {
+    if (!teeTime) return false;
+    const meta = ROUND_METADATA[round];
+    if (!meta || !meta.parseDate) return true; // Fallback just in case
+    
+    // Create an exact timestamp for the tee time in Central Time
+    const matchDateStr = `${meta.parseDate}T${teeTime}:00-05:00`;
+    const matchTime = new Date(matchDateStr).getTime();
+    const now = new Date().getTime();
+    
+    // 30 minutes in milliseconds
+    const thirtyMinutesMs = 30 * 60 * 1000;
+    
+    // True if current time is past (Tee Time - 30 minutes)
+    return now >= (matchTime - thirtyMinutesMs);
   };
 
   // --- AUTOMATED CALENDAR LOCK: INTROCARD MINT ENGINE ---
@@ -324,6 +351,7 @@ export default function DashboardView({
             <div className="flex flex-col gap-3">
               {myMatches.map(match => {
                 const isMatchActive = match.is_live === true || match.is_live === 'true' || match.status === 'live';
+                const isMatchTimeReady = isMatchReadyToStart(match.round, match.tee_time);
                 
                 // Translated names for the UI
                 const p1Name = getPlayerName(match.team1_player1);
@@ -379,12 +407,21 @@ export default function DashboardView({
                         Open Live Match Engine
                       </button>
                     ) : match.status !== 'completed' ? (
-                      <button 
-                        onClick={() => startMatch && startMatch(match.id)}
-                        className="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-[0_4px_20px_rgba(245,158,11,0.2)] border border-amber-400/30 active:scale-[0.98] transition-all"
-                      >
-                        🚀 Initialize / Start Match
-                      </button>
+                      isMatchTimeReady ? (
+                        <button 
+                          onClick={() => startMatch && startMatch(match.id)}
+                          className="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-[0_4px_20px_rgba(245,158,11,0.2)] border border-amber-400/30 active:scale-[0.98] transition-all"
+                        >
+                          🚀 Initialize / Start Match
+                        </button>
+                      ) : (
+                        <button 
+                          disabled
+                          className="w-full py-3 bg-slate-800/50 text-slate-500 font-black text-xs uppercase tracking-widest rounded-xl border border-slate-700/50 cursor-not-allowed"
+                        >
+                          🔒 Unlocks 30m Before Tee Time
+                        </button>
+                      )
                     ) : (
                       <button 
                         onClick={onNavigateToSchedule}

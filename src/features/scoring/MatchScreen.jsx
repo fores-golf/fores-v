@@ -5,14 +5,14 @@ import CardMintingProtocol from '../achievements/CardMintingProtocol';
 import { CARD_RULES_ENGINE } from '../achievements/achievementRules';
 import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
+import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
 
 export default function MatchScreen({ matchId, onBack }) {
-  // 🛑 KILL SWITCH: Set to true to re-enable card minting popups
   const ENABLE_CARD_MINTING = false;
 
   const { player } = useUser();
   const [currentHole, setCurrentHole] = useState(1);
-  const [isInitializing, setIsInitializing] = useState(true); // <--- Added to prevent double-fetching on load
+  const [isInitializing, setIsInitializing] = useState(true);
   const [par, setPar] = useState(4);
   const [activeHoleData, setActiveHoleData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -23,46 +23,90 @@ export default function MatchScreen({ matchId, onBack }) {
   const [currentScoreData, setCurrentScoreData] = useState(null);
 
   const [matchInsights, setMatchInsights] = useState({});
+  const [playerSlot, setPlayerSlot] = useState(null); 
 
-  // --- SMART RESUME: Find the first unscored hole on mount ---
+  // --- NEW: INDIVIDUAL LOCK STATE ---
+  const [isMyRoundComplete, setIsMyRoundComplete] = useState(false);
+
+  // 1. FETCH MATCH INSIGHTS & DETERMINE PLAYER SLOT
   useEffect(() => {
-    async function determineStartingHole() {
-      if (!matchId || !player?.id) {
-        setIsInitializing(false);
-        return;
-      }
+    if (!matchId || !player?.id) return;
 
+    async function fetchLiveInsights() {
+      try {
+        const { data, error } = await supabase
+          .from('matches')
+          .select('*')
+          .eq('id', matchId)
+          .single();
+
+        if (!error && data) {
+          let slot = null;
+          if (player.id === data.team1_player1) slot = 'slanted_a';
+          else if (player.id === data.team1_player2) slot = 'slanted_b';
+          else if (player.id === data.team2_player1) slot = 'brothelmen_a';
+          else if (player.id === data.team2_player2) slot = 'brothelmen_b';
+          
+          setPlayerSlot(slot);
+
+          setMatchInsights({
+            matchupId: matchId,
+            status: `${data.team1_score || 0} vs ${data.team2_score || 0}`,
+            wagerStatus: (data.format || 'LIVE').toUpperCase(),
+            team1Handicap: data.team1_playing_handicap,
+            team2Handicap: data.team2_playing_handicap,
+            team1Name: data.team1_player1,
+            team2Name: data.team2_player1,
+            t1p1: data.team1_player1,
+            t1p2: data.team1_player2,
+            t2p1: data.team2_player1,
+            t2p2: data.team2_player2,
+          });
+        }
+      } catch (err) {
+        console.warn('Insights update failed:', err.message);
+      }
+    }
+    fetchLiveInsights();
+  }, [matchId, player?.id]);
+
+  // 2. SMART RESUME & INDIVIDUAL LOCK DETECTION
+  useEffect(() => {
+    if (!matchId || !playerSlot) return;
+
+    async function determineStartingHole() {
       try {
         const { data, error } = await supabase
           .from('hole_scores')
-          .select('hole_number')
-          .eq('matchup_id', matchId)
-          .eq('profile_id', player.id);
+          .select(`hole_number, score_${playerSlot}`)
+          .eq('matchup_id', matchId);
 
-        if (!error && data && data.length > 0) {
-          const scoredHoles = data.map(d => d.hole_number);
-          let firstUnscored = 1;
+        if (!error && data) {
+          const scoredHoles = data.filter(d => d[`score_${playerSlot}`] !== null).map(d => d.hole_number);
           
-          // Loop up to find the first missing score, capping at 18
-          while (scoredHoles.includes(firstUnscored) && firstUnscored < 18) {
-            firstUnscored++;
+          // Check if this specific player has logged all 18 holes
+          if (scoredHoles.length >= 18) {
+            setIsMyRoundComplete(true);
+            setCurrentHole(18); // Default their view to the 18th hole
+          } else {
+            let firstUnscored = 1;
+            while (scoredHoles.includes(firstUnscored) && firstUnscored < 18) {
+              firstUnscored++;
+            }
+            setCurrentHole(firstUnscored);
           }
-          
-          setCurrentHole(firstUnscored);
         }
       } catch (err) {
-        console.warn('Smart resume failed, defaulting to hole 1:', err.message);
+        console.warn('Smart resume failed:', err.message);
       } finally {
-        setIsInitializing(false); // Let the app know we found the hole
+        setIsInitializing(false);
       }
     }
-
     determineStartingHole();
-  }, [matchId, player?.id]);
+  }, [matchId, playerSlot]);
 
-  // --- FETCH HOLE DATA ---
+  // 3. FETCH ACTIVE HOLE GPS
   useEffect(() => {
-    // Don't fetch until the Smart Resume engine figures out which hole we are on
     if (isInitializing) return;
 
     async function fetchHole() {
@@ -75,13 +119,10 @@ export default function MatchScreen({ matchId, onBack }) {
           .eq('hole_number', currentHole)
           .maybeSingle(); 
 
-        if (error) throw error;
-
-        if (data) {
+        if (!error && data) {
           const convertPostGISToLeaflet = (geoObject) => {
-            if (geoObject && geoObject.coordinates && Array.isArray(geoObject.coordinates)) {
-              const [lng, lat] = geoObject.coordinates;
-              return [lat, lng]; 
+            if (geoObject?.coordinates && Array.isArray(geoObject.coordinates)) {
+              return [geoObject.coordinates[1], geoObject.coordinates[0]]; 
             }
             return [47.5142, -92.2372]; 
           };
@@ -103,8 +144,9 @@ export default function MatchScreen({ matchId, onBack }) {
     fetchHole();
   }, [currentHole, isInitializing]);
 
+  // 4. FETCH EXISTING SCORE
   useEffect(() => {
-    if (!activeHoleData?.id || !matchId || !player?.id) {
+    if (!activeHoleData?.id || !matchId || !playerSlot) {
       setCurrentScoreData(null);
       return;
     }
@@ -115,91 +157,60 @@ export default function MatchScreen({ matchId, onBack }) {
           .from('hole_scores')
           .select('*')
           .eq('matchup_id', matchId)
-          .eq('profile_id', player.id)
           .eq('hole_id', activeHoleData.id)
           .maybeSingle(); 
 
-        if (!error && data) {
-          setCurrentScoreData(data);
+        if (!error && data && data[`score_${playerSlot}`] !== null) {
+          setCurrentScoreData({
+            gross_score: data[`score_${playerSlot}`],
+            putts: data[`putts_${playerSlot}`],
+            accuracy: data[`accuracy_${playerSlot}`],
+            penalty_strokes: data[`penalty_strokes_${playerSlot}`],
+            water_balls: data[`water_balls_${playerSlot}`],
+            drinks: data[`drinks_${playerSlot}`]
+          });
         } else {
           setCurrentScoreData(null); 
         }
       } catch (err) {
-        console.warn('Could not fetch existing hole score:', err.message);
+        console.warn('Could not fetch existing score:', err.message);
       }
     }
-
     fetchExistingScore();
-  }, [activeHoleData, matchId, player?.id]);
+  }, [activeHoleData, matchId, playerSlot]);
 
-  useEffect(() => {
-    if (!matchId) return;
 
-    async function fetchLiveInsights() {
-      try {
-        const { data, error } = await supabase
-          .from('matches')
-          .select(`
-            team1_score, 
-            team2_score, 
-            format,
-            team1_playing_handicap,
-            team2_playing_handicap,
-            team1_player1,
-            team2_player1
-          `)
-          .eq('id', matchId)
-          .single();
-
-        if (!error && data) {
-          setMatchInsights({
-            matchupId: matchId,
-            status: `${data.team1_score || 0} vs ${data.team2_score || 0}`,
-            thru: `Hole ${currentHole}`,
-            wagerStatus: (data.format || 'LIVE').toUpperCase(),
-            team1Handicap: data.team1_playing_handicap,
-            team2Handicap: data.team2_playing_handicap,
-            team1Name: data.team1_player1,
-            team2Name: data.team2_player1
-          });
-        }
-      } catch (err) {
-        console.warn('Insights background update skipped:', err.message);
-      }
-    }
-
-    fetchLiveInsights();
-  }, [currentHole, matchId]);
-
+  // ==========================================
+  // 🏆 MASTER SCORE SAVE & EVALUATION ENGINE 🏆
+  // ==========================================
   const handleScoreSave = async (scoreData) => {
-    if (!activeHoleData || !activeHoleData.id || !matchId || !player?.id) {
-      alert('Missing validation markers. Verify your profile authentication state.');
+    if (!activeHoleData || !matchId || !playerSlot) {
+      alert('Missing validation markers. Cannot save score.');
       return;
     }
 
-    const { error } = await supabase
-      .from('hole_scores')
-      .upsert({
-        matchup_id: matchId,        
-        profile_id: player.id,       
-        hole_id: activeHoleData.id,
-        hole_number: currentHole,
-        gross_score: scoreData.score,
-        putts: scoreData.putts,
-        accuracy: scoreData.accuracy,
-        penalty_strokes: scoreData.penalties,
-        water_balls: scoreData.water,
-        drinks: scoreData.drinks
-      }, { 
-        onConflict: 'matchup_id, hole_id, profile_id' 
-      });
+    const upsertPayload = {
+      matchup_id: matchId,        
+      hole_id: activeHoleData.id,
+      hole_number: currentHole,
+      [`score_${playerSlot}`]: scoreData.score,
+      [`putts_${playerSlot}`]: scoreData.putts,
+      [`accuracy_${playerSlot}`]: scoreData.accuracy,
+      [`penalty_strokes_${playerSlot}`]: scoreData.penalties,
+      [`water_balls_${playerSlot}`]: scoreData.water,
+      [`drinks_${playerSlot}`]: scoreData.drinks
+    };
 
-    if (error) {
-      alert("Database transmission failed: " + error.message);
+    const { error: upsertError } = await supabase
+      .from('hole_scores')
+      .upsert(upsertPayload, { onConflict: 'matchup_id, hole_id' });
+
+    if (upsertError) {
+      alert("Database transmission failed: " + upsertError.message);
       return; 
     }
 
-    setCurrentScoreData({
+    setCurrentScoreData({ 
       gross_score: scoreData.score,
       putts: scoreData.putts,
       accuracy: scoreData.accuracy,
@@ -208,18 +219,59 @@ export default function MatchScreen({ matchId, onBack }) {
       drinks: scoreData.drinks
     });
 
+    // ---------------------------------------------------------
+    // ⚙️ BACKGROUND PROCESS: RUN THE MATCH PLAY ENGINE
+    // ---------------------------------------------------------
+    try {
+      const { data: allHoles } = await supabase
+        .from('holes')
+        .select('id, hole_number, hcp_index')
+        .eq('course_id', activeHoleData.course_id || 1);
+
+      const { data: allMatchScores } = await supabase
+        .from('hole_scores')
+        .select('*')
+        .eq('matchup_id', matchId);
+
+      const mockTeam1 = [{ id: 't1p1', courseHandicap: 10 }, { id: 't1p2', courseHandicap: 15 }];
+      const mockTeam2 = [{ id: 't2p1', courseHandicap: 8 }, { id: 't2p2', courseHandicap: 18 }];
+
+      const format = matchInsights.wagerStatus || '1V1';
+      const handicapData = calculatePlayingHandicaps(format, mockTeam1, mockTeam2);
+      const matchResult = evaluateMatchStatus(format, handicapData, allHoles || [], allMatchScores || []);
+
+      // 🎯 UPDATED: We only update the scores now. We purposefully do NOT update 
+      // the status to 'completed' here so that the match stays live for everyone else.
+      await supabase
+        .from('matches')
+        .update({
+          team1_score: matchResult.team1Wins,
+          team2_score: matchResult.team2Wins
+        })
+        .eq('id', matchId);
+
+      setMatchInsights(prev => ({
+        ...prev,
+        status: `${matchResult.team1Wins} vs ${matchResult.team2Wins}`
+      }));
+
+      // Check if this was their 18th hole saved
+      const myScoresCount = allMatchScores.filter(s => s[`score_${playerSlot}`] !== null).length;
+      if (myScoresCount >= 18 || (currentHole === 18 && myScoresCount === 17)) {
+        setIsMyRoundComplete(true);
+      }
+
+    } catch (engineError) {
+      console.error("Match Play Engine failed:", engineError);
+    }
+
+    // ---------------------------------------------------------
+    // 🃏 ADVANCE LOGIC
+    // ---------------------------------------------------------
     if (ENABLE_CARD_MINTING) {
-      let matchedCardConfig = null;
-
-      matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
-      
-      if (!matchedCardConfig) {
-        matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
-      }
-
-      if (!matchedCardConfig) {
-        matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
-      }
+      let matchedCardConfig = await CARD_RULES_ENGINE.checkOceanGate(scoreData, currentHole, player.id);
+      if (!matchedCardConfig) matchedCardConfig = await CARD_RULES_ENGINE.checkWhammy(scoreData, currentHole, par, matchId, player.id);
+      if (!matchedCardConfig) matchedCardConfig = await CARD_RULES_ENGINE.checkBanquetBirdie(scoreData, par, player.id);
 
       if (matchedCardConfig) {
         const completePayload = {
@@ -229,7 +281,6 @@ export default function MatchScreen({ matchId, onBack }) {
           hole: currentHole,
           courseName: "Fores V Master Course"
         };
-
         setMintPayload(completePayload);
         setIsMintingActive(true);
       } else {
@@ -242,35 +293,35 @@ export default function MatchScreen({ matchId, onBack }) {
 
   const handleExitClick = (e) => {
     e.preventDefault();
-    e.stopPropagation();
-    if (typeof onBack === 'function') {
-      onBack();
-    }
+    if (typeof onBack === 'function') onBack();
   };
 
   return (
     <div className="flex flex-col h-[100dvh] bg-slate-950 text-white font-sans overflow-hidden antialiased fixed inset-0 z-50">
       
+      {/* 🎯 NEW: ROUND COMPLETE BANNER */}
+      {isMyRoundComplete && (
+        <div className="bg-[#34d399] text-black text-center py-1.5 px-4 text-[10px] font-black uppercase tracking-widest z-[99999] relative shrink-0 shadow-md">
+          Your Round is Complete & Locked. Waiting on other players.
+        </div>
+      )}
+
       {/* HUD HEADER */}
-      <header className="absolute top-4 left-4 right-4 bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-2xl flex justify-between items-center px-4 py-2 z-[9999] shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+      <header className={`absolute ${isMyRoundComplete ? 'top-10' : 'top-4'} left-4 right-4 bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-2xl flex justify-between items-center px-4 py-2 z-[9999] shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-all`}>
         <div className="flex items-center gap-2">
           <button 
             onClick={handleExitClick}
             className="text-[10px] font-black uppercase tracking-wider text-red-400 bg-red-500/5 border border-red-500/20 px-2.5 h-8 rounded-xl flex items-center justify-center gap-1 hover:bg-red-500/10 transition-all active:scale-95 cursor-pointer"
           >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
             Exit
           </button>
           
           <button 
-            onClick={(e) => { e.stopPropagation(); setCurrentHole(Math.max(1, currentHole - 1)); }}
+            onClick={() => setCurrentHole(Math.max(1, currentHole - 1))}
             disabled={currentHole === 1 || isInitializing}
             className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-8 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer"
-          >
-            ◀
-          </button>
+          >◀</button>
         </div>
         
         <div className="text-center flex flex-col items-center justify-center select-none">
@@ -288,16 +339,13 @@ export default function MatchScreen({ matchId, onBack }) {
         </div>
         
         <button 
-          onClick={(e) => { e.stopPropagation(); setCurrentHole(Math.min(18, currentHole + 1)); }}
+          onClick={() => setCurrentHole(Math.min(18, currentHole + 1))}
           disabled={currentHole === 18 || isInitializing}
           className="text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-950/40 border border-slate-800/40 w-10 h-8 rounded-xl flex items-center justify-center hover:text-white hover:border-slate-700 transition-all active:scale-95 disabled:opacity-30 cursor-pointer"
-        >
-          ▶
-        </button>
+        >▶</button>
       </header>
 
       <main className="flex-1 relative w-full h-full z-0 bg-slate-950">
-         {/* 🎯 Updated loading check to pause the map until the Smart Resume finishes */}
          {isLoading || isInitializing || !activeHoleData ? (
            <div className="h-full flex items-center justify-center text-slate-600 font-black animate-pulse uppercase tracking-[0.2em] text-xs">
              Syncing Geospatial Arrays...
@@ -306,7 +354,14 @@ export default function MatchScreen({ matchId, onBack }) {
            <PremiumMapMatrix 
              holeData={activeHoleData} 
              insights={matchInsights} 
-             onLogScoreClick={() => setIsScoreSheetOpen(true)} 
+             onLogScoreClick={() => {
+               // Prevent opening the score entry sheet if they are locked out
+               if (isMyRoundComplete) {
+                 alert("Your scorecard is locked for this round. Waiting on other players to finish.");
+               } else {
+                 setIsScoreSheetOpen(true);
+               }
+             }} 
            />
          )}
       </main>

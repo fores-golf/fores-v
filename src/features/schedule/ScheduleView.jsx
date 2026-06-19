@@ -5,13 +5,13 @@ import { supabase } from '../../config/supabaseClient';
 // Adjust this import path based on where your probability engine file is located relative to this file
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
-// Metadata mapping for the UI
+// Metadata mapping for the UI (Added parseable exact dates)
 const ROUND_METADATA = {
-  1: { date: 'June 25th', course: 'Quarry' },
-  2: { date: 'June 26th', course: 'Quarry' },
-  3: { date: 'June 26th', course: 'Legend' },
-  4: { date: 'June 27th', course: 'Legend' },
-  5: { date: 'June 27th', course: 'Quarry' }
+  1: { date: 'June 25th', parseDate: '2026-06-25', course: 'Quarry' },
+  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry' },
+  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend' },
+  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend' },
+  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry' }
 };
 
 export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
@@ -42,6 +42,24 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   // --- STRICT ROSTER SEGMENTATION ---
   const team1Options = golfers.filter(g => g.team === 'Slanted Clams');
   const team2Options = golfers.filter(g => g.team === 'Clam Brothelmen');
+
+  // --- TIME LOCK ENGINE ---
+  const isMatchReadyToStart = (round, teeTime) => {
+    if (!teeTime) return false;
+    const meta = ROUND_METADATA[round];
+    if (!meta || !meta.parseDate) return true; // Fallback just in case
+    
+    // Create an exact timestamp for the tee time in Central Time
+    const matchDateStr = `${meta.parseDate}T${teeTime}:00-05:00`;
+    const matchTime = new Date(matchDateStr).getTime();
+    const now = new Date().getTime();
+    
+    // 30 minutes in milliseconds
+    const thirtyMinutesMs = 30 * 60 * 1000;
+    
+    // True if current time is past (Tee Time - 30 minutes)
+    return now >= (matchTime - thirtyMinutesMs);
+  };
 
   // --- THE "PRE-SET" SCHEDULE GENERATOR ---
   const handleGenerateSkeleton = async () => {
@@ -270,6 +288,9 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
 
             const isMyMatch = matchParticipants.some(p => p === safePlayerId || p === safePlayerName);
             const isEditing = editingMatchId === match.id;
+            
+            // Check if the match is within the 30-minute window
+            const isMatchTimeReady = isMatchReadyToStart(match.round, match.tee_time);
 
             // Captains can only edit if it hasn't started yet. Admins can edit anytime.
             const canEdit = isAdmin || (isAnyCaptain && match.status === 'scheduled' && !match.is_live);
@@ -419,12 +440,22 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                       </div>
 
                       <button 
-                        onClick={() => onLaunchScoringEngine(match.id)}
+                        onClick={() => {
+                          if (isMyMatch && match.status === 'scheduled' && !isMatchTimeReady) {
+                            alert("Too early to launch scoring. The engine unlocks 30 minutes before your tee time.");
+                            return;
+                          }
+                          onLaunchScoringEngine(match.id);
+                        }}
                         className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition-transform active:scale-95 ${
-                          isMyMatch ? 'bg-[#34d399] text-black' : 'bg-white/5 text-slate-300 border border-white/10'
+                          isMyMatch 
+                            ? (match.status === 'scheduled' && !isMatchTimeReady ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700' : 'bg-[#34d399] text-black shadow-[0_0_15px_rgba(52,211,153,0.3)]') 
+                            : 'bg-white/5 text-slate-300 border border-white/10'
                         }`}
                       >
-                        {isMyMatch ? 'Score My Card' : 'View Broadcast'}
+                        {isMyMatch 
+                          ? (match.status === 'scheduled' && !isMatchTimeReady ? 'Too Early to Start' : 'Score My Card') 
+                          : 'View Broadcast'}
                       </button>
                     </div>
                   </>

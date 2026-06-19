@@ -1,68 +1,114 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, CalendarClock } from 'lucide-react';
 import { supabase } from '../../config/supabaseClient';
+// 🎯 Import the handicap math engine we just built!
+import { calculatePlayingHandicaps } from '../../utils/matchPlayEngine';
 
-const getStrokesForHole = (playingHcp, holeHcpIndex) => {
-  let strokes = 0;
-  let h = playingHcp;
-  while (h >= 18) { strokes++; h -= 18; }
-  if (holeHcpIndex <= h) strokes++;
-  return strokes;
+// Helper: Calculate net score for a simulated hole
+const getSimNetScore = (grossScore, strokesReceived, holeDifficultyIndex) => {
+  if (grossScore == null || strokesReceived == null) return null;
+  let strokes = Math.floor(strokesReceived / 18);
+  if ((strokesReceived % 18) >= holeDifficultyIndex) strokes += 1;
+  return grossScore - strokes;
+};
+
+// Helper: Vegas Concatenation
+const getVegasScore = (net1, net2) => {
+  if (net1 == null || net2 == null) return null;
+  if (net1 >= 10 || net2 >= 10) return parseInt(`${Math.max(net1, net2)}${Math.min(net1, net2)}`, 10);
+  return parseInt(`${Math.min(net1, net2)}${Math.max(net1, net2)}`, 10);
+};
+
+// Helper: Simulate a player's gross score using their attributes
+const simulateGross = (player, hole) => {
+  if (!player) return null;
+  
+  let expectedGross = hole.par + ((player.handicap || 0) / 18);
+  if (hole.par === 5 && player.power_rating > 80) expectedGross -= 0.15;
+  
+  const stdev = 0.8 + ((player.handicap || 0) * 0.05) - (player.short_game_rating > 70 ? 0.2 : 0);
+  const variance = (Math.random() + Math.random() + Math.random() - 1.5) * stdev;
+  
+  return Math.max(1, Math.round(expectedGross + variance));
 };
 
 const runMonteCarloSimulation = (matchData, iterations = 2500) => {
-  const { playerA, playerB, unplayedHoles, currentMatchScore } = matchData;
-  let playerAWins = 0;
-  let playerBWins = 0;
+  const { format, handicapData, unplayedHoles, currentMatchScore, players } = matchData;
+  let team1Wins = 0;
+  let team2Wins = 0;
   let ties = 0;
 
-  const baseHcp = Math.min(playerA.handicap, playerB.handicap);
-  const playHcpA = Math.max(0, playerA.handicap - baseHcp);
-  const playHcpB = Math.max(0, playerB.handicap - baseHcp);
+  const upperFormat = (format || '').toUpperCase();
 
   for (let i = 0; i < iterations; i++) {
-    let simMatchScore = currentMatchScore; 
+    let simMatchScore = currentMatchScore; // Positive = Team 1 UP, Negative = Team 2 UP
     let holesRemaining = unplayedHoles.length;
 
     for (const hole of unplayedHoles) {
-      if (Math.abs(simMatchScore) > holesRemaining) break; 
+      if (Math.abs(simMatchScore) > holesRemaining) break; // Match mathematically over
       holesRemaining--;
 
-      let expectedGrossA = hole.par + (playHcpA / 18);
-      let expectedGrossB = hole.par + (playHcpB / 18);
+      // 1. Simulate Gross Scores for all 4 players
+      const g_t1p1 = simulateGross(players.t1p1, hole);
+      const g_t1p2 = simulateGross(players.t1p2, hole);
+      const g_t2p1 = simulateGross(players.t2p1, hole);
+      const g_t2p2 = simulateGross(players.t2p2, hole);
 
-      if (hole.par === 5) {
-        if (playerA.power_rating > 80) expectedGrossA -= 0.15;
-        if (playerB.power_rating > 80) expectedGrossB -= 0.15;
+      let t1Net = Infinity;
+      let t2Net = Infinity;
+
+      // 2. Apply Format Logic
+      if (handicapData.type === 'team') { 
+        // --- SCRAMBLE ---
+        const t1Gross = Math.min(...[g_t1p1, g_t1p2].filter(x => x !== null));
+        const t2Gross = Math.min(...[g_t2p1, g_t2p2].filter(x => x !== null));
+        
+        if (t1Gross !== Infinity && t2Gross !== Infinity) {
+          t1Net = getSimNetScore(t1Gross, handicapData.team1Strokes, hole.hcp_index);
+          t2Net = getSimNetScore(t2Gross, handicapData.team2Strokes, hole.hcp_index);
+        }
+      } else if (upperFormat === 'VEGAS') {
+        // --- VEGAS ---
+        const n_t1p1 = getSimNetScore(g_t1p1, handicapData.team1.t1p1, hole.hcp_index);
+        const n_t1p2 = getSimNetScore(g_t1p2, handicapData.team1.t1p2, hole.hcp_index);
+        const n_t2p1 = getSimNetScore(g_t2p1, handicapData.team2.t2p1, hole.hcp_index);
+        const n_t2p2 = getSimNetScore(g_t2p2, handicapData.team2.t2p2, hole.hcp_index);
+
+        const t1Vegas = getVegasScore(n_t1p1, n_t1p2);
+        const t2Vegas = getVegasScore(n_t2p1, n_t2p2);
+
+        if (t1Vegas !== null && t2Vegas !== null) {
+          t1Net = t1Vegas;
+          t2Net = t2Vegas;
+        }
+      } else { 
+        // --- BEST BALL (Shamble / 1v1) ---
+        const t1Nets = [];
+        if (g_t1p1 !== null) t1Nets.push(getSimNetScore(g_t1p1, handicapData.team1.t1p1, hole.hcp_index));
+        if (g_t1p2 !== null) t1Nets.push(getSimNetScore(g_t1p2, handicapData.team1.t1p2, hole.hcp_index));
+        
+        const t2Nets = [];
+        if (g_t2p1 !== null) t2Nets.push(getSimNetScore(g_t2p1, handicapData.team2.t2p1, hole.hcp_index));
+        if (g_t2p2 !== null) t2Nets.push(getSimNetScore(g_t2p2, handicapData.team2.t2p2, hole.hcp_index));
+
+        if (t1Nets.length > 0) t1Net = Math.min(...t1Nets);
+        if (t2Nets.length > 0) t2Net = Math.min(...t2Nets);
       }
-      
-      const stdevA = 0.8 + (playHcpA * 0.05) - (playerA.short_game_rating > 70 ? 0.2 : 0);
-      const stdevB = 0.8 + (playHcpB * 0.05) - (playerB.short_game_rating > 70 ? 0.2 : 0);
-      
-      const varA = (Math.random() + Math.random() + Math.random() - 1.5) * stdevA;
-      const varB = (Math.random() + Math.random() + Math.random() - 1.5) * stdevB;
 
-      const grossA = Math.max(1, Math.round(expectedGrossA + varA));
-      const grossB = Math.max(1, Math.round(expectedGrossB + varB));
-
-      const strokesA = getStrokesForHole(playHcpA, hole.hcp_index);
-      const strokesB = getStrokesForHole(playHcpB, hole.hcp_index);
-      
-      const netA = grossA - strokesA;
-      const netB = grossB - strokesB;
-
-      if (netA < netB) simMatchScore++;
-      else if (netB < netA) simMatchScore--;
+      // 3. Tally simulated hole
+      if (t1Net < t2Net) simMatchScore++;
+      else if (t2Net < t1Net) simMatchScore--;
     }
 
-    if (simMatchScore > 0) playerAWins++;
-    else if (simMatchScore < 0) playerBWins++;
+    // 4. Tally overall iteration
+    if (simMatchScore > 0) team1Wins++;
+    else if (simMatchScore < 0) team2Wins++;
     else ties++;
   }
 
   return {
-    playerA: Math.round((playerAWins / iterations) * 100),
-    playerB: Math.round((playerBWins / iterations) * 100),
+    playerA: Math.round((team1Wins / iterations) * 100),
+    playerB: Math.round((team2Wins / iterations) * 100),
     tie: Math.round((ties / iterations) * 100),
   };
 };
@@ -88,29 +134,39 @@ const useMatchData = (matchId, status) => {
           .single();
         if (matchError) throw matchError;
 
-        // 2. Extract the profile UUIDs from the match
-        const idA = match.team1_player1_id || match.team1_player1;
-        const idB = match.team2_player1_id || match.team2_player1;
+        // 2. Fetch all profiles attached to this match
+        const playerIds = [
+          match.team1_player1, match.team1_player2, 
+          match.team2_player1, match.team2_player2
+        ].filter(Boolean);
 
-        // 3. Fetch profiles BY ID instead of name
         const { data: profiles, error: profileError } = await supabase
           .from('players')
           .select('id, name, handicap, power_rating, short_game_rating')
-          .in('id', [idA, idB]);
+          .in('id', playerIds);
         if (profileError) throw profileError;
 
-        // Match profiles based on the fetched UUIDs
-        const pA = profiles?.find(p => p.id === idA);
-        const pB = profiles?.find(p => p.id === idB);
+        // Map players
+        const players = {
+          t1p1: profiles.find(p => p.id === match.team1_player1),
+          t1p2: profiles.find(p => p.id === match.team1_player2),
+          t2p1: profiles.find(p => p.id === match.team2_player1),
+          t2p2: profiles.find(p => p.id === match.team2_player2),
+        };
 
-        // Fail-safe if DB relationships are disconnected so UI doesn't crash
-        if (!pA || !pB) {
-            console.warn("Could not find matching profiles for IDs:", idA, idB);
-            if (isMounted) setIsCalculating(false);
-            return;
-        }
+        // 3. Format arrays for the Handicap Engine
+        const team1Arr = [];
+        if (players.t1p1) team1Arr.push({ id: 't1p1', courseHandicap: players.t1p1.handicap });
+        if (players.t1p2) team1Arr.push({ id: 't1p2', courseHandicap: players.t1p2.handicap });
+        
+        const team2Arr = [];
+        if (players.t2p1) team2Arr.push({ id: 't2p1', courseHandicap: players.t2p1.handicap });
+        if (players.t2p2) team2Arr.push({ id: 't2p2', courseHandicap: players.t2p2.handicap });
 
-        // 4. Fetch Course Data
+        const format = match.format || '1v1';
+        const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
+
+        // 4. Fetch Course Holes
         const { data: holes, error: holesError } = await supabase
           .from('holes')
           .select('*')
@@ -118,36 +174,16 @@ const useMatchData = (matchId, status) => {
           .order('hole_number', { ascending: true });
         if (holesError) throw holesError;
 
-        const baseHcp = Math.min(pA.handicap, pB.handicap);
-        const playHcpA = Math.max(0, pA.handicap - baseHcp);
-        const playHcpB = Math.max(0, pB.handicap - baseHcp);
-
-        let currentMatchScore = 0; 
+        // 5. Determine holes left to play
         let lastPlayedHole = 0;
-
-        // 5. Connect live scores via profile.id
         if (status === 'live') {
-          const { data: scores, error: scoresError } = await supabase
+          const { data: scores } = await supabase
             .from('hole_scores')
-            .select('*')
+            .select('hole_number')
             .eq('matchup_id', matchId);
-          if (scoresError) throw scoresError;
-
+          
           if (scores && scores.length > 0) {
-              for (const hole of holes) {
-                // Match the score record to the correct player's UUID
-                const scoreA = scores.find(s => s.hole_number === hole.hole_number && s.id === pA.id);
-                const scoreB = scores.find(s => s.hole_number === hole.hole_number && s.id === pB.id);
-
-                if (scoreA && scoreB && scoreA.gross_score && scoreB.gross_score) {
-                  lastPlayedHole = hole.hole_number;
-                  const netA = scoreA.gross_score - getStrokesForHole(playHcpA, hole.hcp_index);
-                  const netB = scoreB.gross_score - getStrokesForHole(playHcpB, hole.hcp_index);
-                  
-                  if (netA < netB) currentMatchScore++;
-                  if (netB < netA) currentMatchScore--;
-                }
-              }
+            lastPlayedHole = Math.max(...scores.map(s => s.hole_number));
           }
         }
 
@@ -155,19 +191,21 @@ const useMatchData = (matchId, status) => {
           ? holes 
           : holes.filter(h => h.hole_number > lastPlayedHole);
 
+        // Calculate real-time score straight from the master match table
+        const currentMatchScore = (match.team1_score || 0) - (match.team2_score || 0);
+
         const processedState = {
-          playerA: pA,
-          playerB: pB,
-          playHcpA,
-          playHcpB,
+          format,
+          handicapData,
+          players,
           unplayedHoles,
           currentMatchScore,
-          lastPlayedHole,
-          holesRemaining: unplayedHoles.length
         };
 
         if (isMounted) {
           setMatchData(processedState);
+          
+          // Execute Monte Carlo in background
           setTimeout(() => {
             if (isMounted) {
               const results = runMonteCarloSimulation(processedState);
@@ -242,7 +280,7 @@ export const MatchProbabilityBar = ({ matchId, status, team1Name, team2Name, var
         )}
         {!isLive && (
           <span className="text-slate-500 lowercase normal-case tracking-normal font-medium">
-             ({matchData.playerA.name.split(' ')[0]} gets {matchData.playHcpA}, {matchData.playerB.name.split(' ')[0]} gets {matchData.playHcpB})
+            (Calculated using {matchData.format} analytics)
           </span>
         )}
       </div>
