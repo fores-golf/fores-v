@@ -17,7 +17,6 @@ export default function DashboardView({
   isChirpsOpen
 }) {
   const { player } = useUser();
-  // We added 'golfers' here so we can translate IDs to names
   const { myMatches, loading, startMatch, golfers } = useScheduleData();
   const showChirpAlert = useChirpsNotification(isChirpsOpen);
 
@@ -26,6 +25,45 @@ export default function DashboardView({
 
   // State to control the 3-second entrance animation for the dice icon
   const [animateDice, setAnimateDice] = useState(true);
+
+  // --- UPDATED: SPLASH SCREEN STATE (ONCE PER SESSION) ---
+  const [showSplash, setShowSplash] = useState(() => {
+    // Check if they've already seen it this session
+    return sessionStorage.getItem('fores_v_splash_seen') !== 'true';
+  });
+
+  const handleDismissSplash = () => {
+    // Lock it out for the rest of the session
+    sessionStorage.setItem('fores_v_splash_seen', 'true');
+    setShowSplash(false);
+  };
+
+  // --- COUNTDOWN ENGINE ---
+  const [timeLeft, setTimeLeft] = useState({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+
+  useEffect(() => {
+    // Target: June 25, 2026, 3:30 PM Central Time (UTC-5 during Daylight Saving)
+    const targetDate = new Date('2026-06-25T15:30:00-05:00').getTime();
+
+    const updateCountdown = () => {
+      const now = new Date().getTime();
+      const distance = targetDate - now;
+
+      if (distance > 0) {
+        setTimeLeft({
+          days: Math.floor(distance / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((distance % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+          minutes: Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60)),
+          seconds: Math.floor((distance % (1000 * 60)) / 1000)
+        });
+      }
+    };
+
+    updateCountdown(); // Run immediately on mount
+    const intervalId = setInterval(updateCountdown, 1000);
+
+    return () => clearInterval(intervalId);
+  }, []);
 
   // Handle the 3-second animation timeout on mount
   useEffect(() => {
@@ -39,7 +77,7 @@ export default function DashboardView({
   const getPlayerName = (identifier) => {
     if (!identifier) return "TBD";
     const found = golfers.find(g => g.id === identifier);
-    return found ? found.name : identifier; // fallback to raw string if not found
+    return found ? found.name : identifier; 
   };
 
   // --- AUTOMATED CALENDAR LOCK: INTROCARD MINT ENGINE ---
@@ -47,12 +85,10 @@ export default function DashboardView({
     async function verifyIntroCardMint() {
       if (!player?.id) return;
 
-      // Restrict execution baseline criteria until calendar passes June 23, 2026
       const tripLaunchDate = new Date('2026-06-23T00:00:00');
       if (new Date() < tripLaunchDate) return; 
 
       try {
-        // Query if user contains an existing intro card layout record row inside metadata blocks
         const { data: alreadyMinted } = await supabase
           .from('player_cards')
           .select('id')
@@ -65,7 +101,7 @@ export default function DashboardView({
             .from('player_cards')
             .insert({
               player_id: player.id,
-              template_id: 'tpl-intro-card-id', // Maps cleanly down to your card_templates row record ID
+              template_id: 'tpl-intro-card-id',
               is_in_pack: true,
               minted_at: new Date(),
               captured_metadata: {
@@ -90,6 +126,66 @@ export default function DashboardView({
   return (
     <div className="min-h-[100dvh] bg-[#060911] text-white font-sans pb-safe flex flex-col overflow-y-auto relative selection:bg-[#34d399]/20">
       
+      {/* --- HYPER-STYLED SPLASH SCREEN OVERLAY --- */}
+      {showSplash && (
+        <div 
+          onClick={handleDismissSplash}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-[#060911] cursor-pointer"
+        >
+          {/* Splash Ambient Glow */}
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] h-[60%] bg-[#34d399]/15 blur-[150px] rounded-full pointer-events-none z-0 animate-pulse duration-[3000ms]"></div>
+          
+          <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 w-full max-w-sm space-y-6 animate-[fadeIn_0.5s_ease-out]">
+            
+            {/* Splash Title */}
+            <div>
+              <h2 className="text-4xl font-black tracking-tight uppercase italic bg-gradient-to-r from-white via-slate-100 via-white to-slate-500 bg-clip-text text-transparent leading-none select-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.8)]">
+                Fores V
+              </h2>
+              <p className="mt-2 text-[11px] font-black uppercase tracking-[0.25em] text-[#34d399] drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]">
+                Land Of 10,000 Putts
+              </p>
+            </div>
+
+            {/* Countdown Engine */}
+            <div className="pt-6 w-full flex flex-col items-center">
+              <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-3 animate-pulse">T-Minus</span>
+              
+              <div className="flex items-center justify-center gap-3 w-full bg-black/50 p-5 rounded-[2rem] border border-white/10 shadow-[0_0_40px_rgba(52,211,153,0.1),inset_0_2px_10px_rgba(0,0,0,0.5)] backdrop-blur-md">
+                {/* Days */}
+                <div className="flex flex-col items-center w-12">
+                  <span className="text-3xl font-mono font-black text-[#34d399] drop-shadow-[0_0_10px_rgba(52,211,153,0.3)]">{timeLeft.days}</span>
+                  <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Days</span>
+                </div>
+                <span className="text-xl font-black text-slate-700 pb-4">:</span>
+                
+                {/* Hours */}
+                <div className="flex flex-col items-center w-12">
+                  <span className="text-3xl font-mono font-black text-slate-100">{timeLeft.hours.toString().padStart(2, '0')}</span>
+                  <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Hrs</span>
+                </div>
+                <span className="text-xl font-black text-slate-700 pb-4">:</span>
+                
+                {/* Minutes */}
+                <div className="flex flex-col items-center w-12">
+                  <span className="text-3xl font-mono font-black text-slate-100">{timeLeft.minutes.toString().padStart(2, '0')}</span>
+                  <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Min</span>
+                </div>
+                <span className="text-xl font-black text-slate-700 pb-4">:</span>
+                
+                {/* Seconds */}
+                <div className="flex flex-col items-center w-12">
+                  <span className="text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_10px_rgba(251,191,36,0.3)]">{timeLeft.seconds.toString().padStart(2, '0')}</span>
+                  <span className="text-[8px] font-bold text-slate-500 tracking-widest uppercase mt-1">Sec</span>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[9px] text-slate-500/60 font-bold tracking-[0.2em] uppercase mt-8 absolute bottom-[-50px]">Tap to enter clubhouse</p>
+          </div>
+        </div>
+      )}
+
       {/* Dynamic Ambient Background Illumination */}
       <div className="absolute top-[-5%] right-[-10%] w-[70%] h-[35%] bg-[#34d399]/10 blur-[130px] rounded-full pointer-events-none z-0 animate-pulse duration-[6000ms]"></div>
       <div 
