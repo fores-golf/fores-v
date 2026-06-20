@@ -1,54 +1,53 @@
 /**
- * PHASE 1 & 2: Calculate the adjusted strokes everyone gets off the lowest player/team
+ * PHASE 1 & 2: Baseline everyone to the lowest raw player, THEN apply format rules
  */
 export function calculatePlayingHandicaps(format, team1Players, team2Players) {
-  const t1p1 = team1Players[0]?.courseHandicap || 0;
-  const t1p2 = team1Players[1]?.courseHandicap || 0;
-  const t2p1 = team2Players[0]?.courseHandicap || 0;
-  const t2p2 = team2Players[1]?.courseHandicap || 0;
+  // 1. Get raw course handicaps
+  const t1p1Raw = team1Players[0]?.courseHandicap || 0;
+  const t1p2Raw = team1Players[1]?.courseHandicap || 0;
+  const t2p1Raw = team2Players[0]?.courseHandicap || 0;
+  const t2p2Raw = team2Players[1]?.courseHandicap || 0;
+
+  // 2. Find the absolute lowest raw handicap across ALL players
+  const allRaws = [t1p1Raw, t1p2Raw, t2p1Raw, t2p2Raw];
+  const lowestRaw = Math.min(...allRaws);
+
+  // 3. Baseline everyone down to scratch based on that lowest player
+  const t1p1Base = t1p1Raw - lowestRaw;
+  const t1p2Base = t1p2Raw - lowestRaw;
+  const t2p1Base = t2p1Raw - lowestRaw;
+  const t2p2Base = t2p2Raw - lowestRaw;
 
   const upperFormat = (format || '').toUpperCase();
 
+  // 4. Calculate formats using the NEW BASELINED handicaps
   if (upperFormat === 'SCRAMBLE') {
+    // Apply the 35/15 rule to the baselined numbers
     const t1Hcp = team1Players.length > 1 
-      ? (0.35 * Math.min(t1p1, t1p2)) + (0.15 * Math.max(t1p1, t1p2)) 
-      : t1p1;
+      ? (0.35 * Math.min(t1p1Base, t1p2Base)) + (0.15 * Math.max(t1p1Base, t1p2Base)) 
+      : t1p1Base;
     
     const t2Hcp = team2Players.length > 1 
-      ? (0.35 * Math.min(t2p1, t2p2)) + (0.15 * Math.max(t2p1, t2p2)) 
-      : t2p1;
+      ? (0.35 * Math.min(t2p1Base, t2p2Base)) + (0.15 * Math.max(t2p1Base, t2p2Base)) 
+      : t2p1Base;
 
-    const roundedT1 = Math.round(t1Hcp);
-    const roundedT2 = Math.round(t2Hcp);
-
-    const lowest = Math.min(roundedT1, roundedT2);
-    
     return {
-      team1Strokes: roundedT1 - lowest,
-      team2Strokes: roundedT2 - lowest,
+      team1Strokes: Math.round(t1Hcp),
+      team2Strokes: Math.round(t2Hcp),
       type: 'team'
     };
   }
 
   // 1v1, Shamble, or Vegas
-  // Shamble gets 60%. Vegas and 1v1 get 100% (1.0).
+  // Apply allowances (e.g., 60% for Shamble) to the baselined handicaps
   const allowance = upperFormat === 'SHAMBLE' ? 0.60 : 1.0;
-
-  const rawHcps = [
-    { id: 't1p1', hcp: Math.round(t1p1 * allowance) },
-    { id: 't1p2', hcp: Math.round(t1p2 * allowance) },
-    { id: 't2p1', hcp: Math.round(t2p1 * allowance) },
-    { id: 't2p2', hcp: Math.round(t2p2 * allowance) }
-  ].filter(p => p.hcp !== null && p.hcp !== undefined && !isNaN(p.hcp));
-
-  const lowest = rawHcps.length > 0 ? Math.min(...rawHcps.map(p => p.hcp)) : 0;
 
   const strokes = { team1: {}, team2: {}, type: 'individual' };
   
-  rawHcps.forEach(p => {
-    if (p.id.startsWith('t1')) strokes.team1[p.id] = p.hcp - lowest;
-    if (p.id.startsWith('t2')) strokes.team2[p.id] = p.hcp - lowest;
-  });
+  if (team1Players[0]) strokes.team1['t1p1'] = Math.round(t1p1Base * allowance);
+  if (team1Players[1]) strokes.team1['t1p2'] = Math.round(t1p2Base * allowance);
+  if (team2Players[0]) strokes.team2['t2p1'] = Math.round(t2p1Base * allowance);
+  if (team2Players[1]) strokes.team2['t2p2'] = Math.round(t2p2Base * allowance);
 
   return strokes;
 }
