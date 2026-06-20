@@ -11,11 +11,10 @@ export default function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   
-  // Roster Claim State (for new signups)
+  // Roster Claim State
   const [unclaimedPlayers, setUnclaimedPlayers] = useState([]);
   const [selectedPlayerId, setSelectedPlayerId] = useState('');
 
-  // Fetch players who haven't created an account yet
   useEffect(() => {
     async function fetchUnclaimedPlayers() {
       const { data } = await supabase
@@ -47,31 +46,26 @@ export default function AuthScreen() {
         });
         if (signInError) throw signInError;
         
-        // If successful, App.jsx's onAuthStateChange listener will automatically catch it and route to the dashboard.
       } else {
         // --- SIGN UP FLOW ---
         if (!selectedPlayerId) {
           throw new Error('Please select your name from the roster to claim your profile.');
         }
 
-        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+        // 🎯 FIX: Pass the claimed ID securely into the auth metadata
+        const { error: signUpError } = await supabase.auth.signUp({
           email,
           password,
+          options: {
+            data: {
+              claimed_player_id: selectedPlayerId
+            }
+          }
         });
 
         if (signUpError) throw signUpError;
 
-        // If sign up is successful, link their new auth ID to their player profile
-        if (authData?.user) {
-          const { error: linkError } = await supabase
-            .from('players')
-            .update({ auth_id: authData.user.id })
-            .eq('id', selectedPlayerId);
-
-          if (linkError) throw linkError;
-        }
-
-        setMessage('Registration successful! You are now logged in and linked to your roster profile.');
+        setMessage('Registration successful! You are now linked to your roster profile.');
       }
     } catch (err) {
       setError(err.message);
