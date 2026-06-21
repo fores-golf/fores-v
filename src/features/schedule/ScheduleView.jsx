@@ -65,7 +65,7 @@ const FORMAT_RULES = {
 };
 
 export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
-  const { player, isAdmin } = useUser();
+  const { player } = useUser();
   const { allMatches, golfers, loading, refreshMatches } = useScheduleData();
   const [activeRound, setActiveRound] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -122,25 +122,12 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     );
   }
 
-  const HARDCODED_ADMIN_ID = '2889dad2-6a62-41e5-85be-8f8f5f88c893';
-  const isUserExplicitAdmin = isAdmin || 
-    String(player?.auth_id).trim().toLowerCase() === HARDCODED_ADMIN_ID || 
-    String(player?.id).trim().toLowerCase() === HARDCODED_ADMIN_ID;
-
-  const isAnyCaptain = isUserExplicitAdmin || 
-    player?.name?.includes('Kevin Gurney') || 
-    player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274';
+  // Admin and captain privileges are temporarily disabled to treat everyone as a general user
+  const isUserExplicitAdmin = false;
+  const isAnyCaptain = false;
 
   const team1Options = golfers.filter(g => g.team === 'Slanted Clams');
   const team2Options = golfers.filter(g => g.team === 'Clam Brothelmen');
-
-  const isMatchReadyToStart = (round, teeTime) => {
-    if (!teeTime) return false;
-    const meta = ROUND_METADATA[round];
-    if (!meta || !meta.parseDate) return true;
-    const matchDateStr = `${meta.parseDate}T${teeTime}-05:00`;
-    return new Date().getTime() >= (new Date(matchDateStr).getTime() - (30 * 60 * 1000));
-  };
 
   const resolveGolfer = (refId) => {
     if (!refId) return null;
@@ -160,15 +147,12 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     setIsProcessing(true);
     try {
       const updates = {};
-      if (isUserExplicitAdmin || player?.name?.includes('Kevin Gurney')) {
+      // Roster edits will utilize standard permissions if active
+      if (isUserExplicitAdmin) {
         updates.team1_player1 = editForm.t1p1 || null;
         updates.team1_player2 = editForm.t1p2 || null;
-      }
-      if (isUserExplicitAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274') {
         updates.team2_player1 = editForm.t2p1 || null;
         updates.team2_player2 = editForm.t2p2 || null;
-      }
-      if (isUserExplicitAdmin) {
         updates.format = editForm.format || 'TBD';
       }
 
@@ -317,7 +301,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
           };
 
           const isMyMatch = cleanIsMe(match.team1_player1) || cleanIsMe(match.team1_player2) || cleanIsMe(match.team2_player1) || cleanIsMe(match.team2_player2);
-          const isMatchTimeReady = isMatchReadyToStart(match.round, match.tee_time);
           const isEditing = editingMatchId === match.id;
           
           const isCurrentlyLive = match.is_live === true || match.is_live === 'true';
@@ -410,7 +393,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
               <div className="grid grid-cols-2 gap-4 items-center bg-black/20 p-3 rounded-xl border border-white/5">
                 <div>
                   <span className="text-[9px] font-black uppercase text-blue-400 block mb-1">Slanted Clams</span>
-                  {isEditing && (isUserExplicitAdmin || player?.name?.includes('Kevin Gurney')) ? (
+                  {isEditing ? (
                     <div className="space-y-2 mt-2">
                       <select value={editForm.t1p1} onChange={(e) => setEditForm({...editForm, t1p1: e.target.value})} className="w-full bg-black/40 border border-blue-500/30 rounded p-1.5 text-xs text-white">
                         <option value="">Select Lead...</option>
@@ -443,7 +426,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                 
                 <div className="text-right border-l border-white/5 pl-4">
                   <span className="text-[9px] font-black uppercase text-red-400 block mb-1">Brothelmen</span>
-                  {isEditing && (isUserExplicitAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274') ? (
+                  {isEditing ? (
                     <div className="space-y-2 mt-2">
                       <select value={editForm.t2p1} onChange={(e) => setEditForm({...editForm, t2p1: e.target.value})} className="w-full bg-black/40 border border-red-500/30 rounded p-1.5 text-xs text-white">
                         <option value="">Select Lead...</option>
@@ -487,19 +470,11 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                   </div>
                   <button 
                     onClick={() => {
-                      if (!isUserExplicitAdmin && isMyMatch && !isCurrentlyLive && !isMatchTimeReady) {
-                        alert("Too early to launch scoring. The engine unlocks 30 minutes before your tee time.");
-                        return;
-                      }
                       onLaunchScoringEngine(match.id);
                     }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase transition-transform active:scale-95 ${
-                      isUserExplicitAdmin || isCurrentlyLive || (isMyMatch && isMatchTimeReady) 
-                        ? 'bg-[#34d399] text-black shadow-lg' 
-                        : 'bg-slate-800 text-slate-500 border border-slate-700'
-                    }`}
+                    className="px-4 py-2.5 rounded-xl text-xs font-black uppercase transition-transform active:scale-95 bg-[#34d399] text-black shadow-lg"
                   >
-                    {isUserExplicitAdmin ? 'Force Launch Scorecard' : isMyMatch ? (isCurrentlyLive ? 'Score My Card' : !isMatchTimeReady ? 'Too Early to Start' : 'Start Scoring') : (isCurrentlyLive ? 'View Broadcast' : 'Match Preview')}
+                    {isMyMatch ? (isCurrentlyLive ? 'Score My Card' : 'Explore/Start Scoring') : (isCurrentlyLive ? 'View Broadcast' : 'Explore Match Card')}
                   </button>
                 </div>
               )}
