@@ -75,7 +75,7 @@ export default function LiveTicker() {
                     <span>{t1Names}</span>
                     
                     {/* Inline Numeric Score Badge */}
-                    <div className="flex items-center gap-1.5 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-white font-black tabular-nums">
+                    <div className="flex items-center gap-1.5 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-white font-black tabular-nums shadow-inner">
                       <span className={Number(match.team1_score) > Number(match.team2_score) ? "text-blue-400" : ""}>
                         {match.team1_score || 0}
                       </span>
@@ -88,13 +88,15 @@ export default function LiveTicker() {
                     <span>{t2Names}</span>
                   </div>
                   
-                  <div className="w-24 h-3 opacity-90 pointer-events-none ml-2">
+                  {/* FIX: shrink-0 and min-w-max prevents flexbox from squishing the bar to 0 pixels */}
+                  <div className="opacity-90 pointer-events-none flex items-center shrink-0 min-w-max">
                     <MatchProbabilityBar 
                       matchId={match.id} 
                       status={match.status} 
                       team1Name={match.team1_player1} 
                       team2Name={match.team2_player1} 
                       staticMode={true} 
+                      variant="ticker"
                     />
                   </div>
                 </div>

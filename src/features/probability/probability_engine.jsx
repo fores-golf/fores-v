@@ -80,14 +80,12 @@ const simulateGross = (player, hole) => {
 const runMonteCarloSimulation = async (matchData, iterations = 2500) => {
   const { format, handicapData, unplayedHoles, currentMatchScore, players, isCompleted } = matchData;
 
-  // 🎯 FIX: Short-circuit only kicks in if there are truly no holes left to play
   if (isCompleted && unplayedHoles.length === 0) {
     if (currentMatchScore > 0) return { playerA: 100, tie: 0, playerB: 0 };
     if (currentMatchScore < 0) return { playerA: 0, tie: 0, playerB: 100 };
     return { playerA: 0, tie: 100, playerB: 0 };
   }
 
-  // Fallback early protection if a team completely clinches during normal play
   if (Math.abs(currentMatchScore) > unplayedHoles.length) {
     if (currentMatchScore > 0) return { playerA: 100, tie: 0, playerB: 0 };
     if (currentMatchScore < 0) return { playerA: 0, tie: 0, playerB: 100 };
@@ -160,7 +158,6 @@ const runMonteCarloSimulation = async (matchData, iterations = 2500) => {
   return { playerA: roundedA, tie: roundedTie, playerB: 100 - roundedA - roundedTie };
 };
 
-// 🎯 CRITICAL FIX: Passed staticMode into the hook definition
 export const useMatchData = (matchId, status, staticMode = false) => {
   const [matchData, setMatchData] = useState(null);
   const [probabilities, setProbabilities] = useState({ playerA: 0, playerB: 0, tie: 0 });
@@ -168,10 +165,9 @@ export const useMatchData = (matchId, status, staticMode = false) => {
   const [generationTick, setGenerationTick] = useState(0);
 
   useEffect(() => {
-    // 🎯 CRITICAL FIX: Skip channel creation entirely if static mode is active
+    // Skip channel creation entirely if static mode is active (like in the Ticker)
     if (!matchId || staticMode) return; 
 
-    // Add random string to channel name to prevent identical components colliding
     const uniqueChannelName = `live-odds-${matchId}-${Math.random().toString(36).substring(7)}`;
 
     const oddsSubscription = supabase
@@ -267,10 +263,10 @@ export const useMatchData = (matchId, status, staticMode = false) => {
 
 export const MatchProbabilityBar = ({ matchId, status, team1Name, team2Name, variant = 'full', staticMode = false }) => {
   const { player } = useUser(); 
-  // 🎯 CRITICAL FIX: Pass staticMode from the component props into the hook
   const { matchData, probabilities, isCalculating } = useMatchData(matchId, status, staticMode);
 
   if (isCalculating || !matchData) {
+    if (variant === 'ticker') return <div className="w-32 h-1.5 ml-2 bg-slate-800 animate-pulse rounded-full" />;
     if (variant === 'micro') return <div className="h-2 mt-2 mb-1 w-full bg-slate-800 animate-pulse rounded-full" />;
     return <div className="mt-4 pt-3 border-t border-white/5 animate-pulse"><div className="h-1.5 bg-white/10 rounded-full w-full"></div></div>;
   }
@@ -299,6 +295,22 @@ export const MatchProbabilityBar = ({ matchId, status, team1Name, team2Name, var
   const leftTextColor = isMyTeam2 ? 'text-red-400' : 'text-blue-400';
   const rightTextColor = isMyTeam2 ? 'text-blue-400' : 'text-red-400';
 
+  // --- NEW TICKER VARIANT ---
+  if (variant === 'ticker') {
+    return (
+      <div className="flex items-center gap-1.5 w-32 ml-2 pl-2 border-l border-white/10">
+        <span className={`text-[9px] font-black tabular-nums ${leftTextColor}`}>{displayLeft}%</span>
+        <div className="flex-1 h-1.5 bg-black/60 rounded-full overflow-hidden flex shadow-inner border border-white/5">
+          <div className={`h-full ${leftBarColor} transition-all duration-500`} style={{ width: `${displayLeft}%` }} />
+          <div className="h-full bg-slate-600 transition-all duration-500" style={{ width: `${probabilities.tie}%` }} />
+          <div className={`h-full ${rightBarColor} transition-all duration-500`} style={{ width: `${displayRight}%` }} />
+        </div>
+        <span className={`text-[9px] font-black tabular-nums ${rightTextColor}`}>{displayRight}%</span>
+      </div>
+    );
+  }
+
+  // --- MICRO VARIANT ---
   if (variant === 'micro') {
     return (
       <div className="flex flex-col w-full gap-1 mt-1.5 pt-1.5 border-t border-slate-800">
@@ -315,6 +327,7 @@ export const MatchProbabilityBar = ({ matchId, status, team1Name, team2Name, var
     );
   }
 
+  // --- FULL DEFAULT VARIANT ---
   return (
     <div className="mt-3 pt-3 border-t border-white/5 flex flex-col gap-2">
       <div className="flex justify-between items-center text-[9px] uppercase tracking-widest font-black">
