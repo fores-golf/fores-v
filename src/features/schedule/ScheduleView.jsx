@@ -7,13 +7,12 @@ import { MatchProbabilityBar } from '../probability/probability_engine';
 
 const ROUND_METADATA = {
   1: { date: 'June 25th', parseDate: '2026-06-25', course: 'Quarry', format: 'Vegas' },
-  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry', format: 'Scramble' },
-  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend', format: 'Shamble' },
-  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend', format: 'Best Ball' },
-  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry', format: 'Vegas' }
+  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry', format: 'Greensomes' },
+  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend', format: 'Best Ball' },
+  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend', format: 'Scramble' },
+  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry', format: '1v1' }
 };
 
-// Tournament format rulebooks - Synchronized with your custom provisions
 const FORMAT_RULES = {
   'vegas': {
     title: 'Vegas Rules',
@@ -23,8 +22,29 @@ const FORMAT_RULES = {
       'Partner scores are paired side-by-side to form a 2-digit number (e.g., net 4 and net 5 becomes a 45).',
       'The lowest net score always fills the tens digit position (e.g., if you shoot a 6 and your partner shoots a 4, your team score is 46).',
       'Exception: If any player records a double digit net score (10 or higher), the numbers are concatenated with the HIGHER number first.',
-      'Handicaps are at 100% of course handicap, normalizing to lowest handicap of the group. Strokes are applied for the other 3 golfers to holes based on difficulty index.',
-      'The lower two digit number wins the hole. Most holes won wins the match!'
+      'Handicaps are at 100% of course handicap, normalizing to the lowest handicap of the group. Strokes applied to holes based on difficulty index.',
+      'The lower two digit number wins the hole. Match Play execution.'
+    ]
+  },
+  'greensomes': {
+    title: 'Greensomes (Modified Alternate Shot)',
+    tagline: 'Strategic Team Execution',
+    description: 'Both players tee off, pick the best drive, and play alternate shot into the hole.',
+    bullets: [
+      'Both players tee off on every hole. The team selects the best drive.',
+      'The player whose drive was NOT selected hits the second shot.',
+      'Players alternate shots from there until the ball is holed.',
+      'Team Handicaps: 60% of the lower handicap + 40% of the higher handicap. Normalized so the lowest team is set to 0. Match Play.'
+    ]
+  },
+  'best ball': {
+    title: 'Fourball (Best Ball) Rules',
+    tagline: 'Pure Match Play Execution',
+    description: 'Traditional match play format testing individual consistency and partner ham-and-egging.',
+    bullets: [
+      'All players play their own independent golf ball from tee to green on every hole.',
+      'Partners compare net scores on the green. The lowest single net score becomes the team score.',
+      'Handicaps: Calculated at 90% of individual course handicap, normalized to the lowest player in the group. Strokes applied to hardest holes.'
     ]
   },
   'scramble': {
@@ -35,31 +55,17 @@ const FORMAT_RULES = {
       'Both players tee off. The team selects the best drive position and marks it.',
       'Both players hit their next shots from within one club-length of the selected spot. No closer to the hole. No changing lie (can\'t go rough -> fairway).',
       'This process repeats until the ball is holed out.',
-      'Team handicaps are created by taking 15% of the higher handicap and 35% of the lower handicap. Strokes are applied to holes based on difficulty index.',
-      'Low team score wins the hole. Most holes won wins the match!'
+      'Team handicaps: 35% of the lower handicap and 15% of the higher handicap. Normalized to 0 for the lower team. Match Play execution.'
     ]
   },
-  'shamble': {
-    title: '2-Man Shamble Rules',
-    tagline: 'Let your partner bail your out off the tee',
-    description: 'A dynamic hybrid combining scramble advantages with individual match execution.',
+  '1v1': {
+    title: 'Singles Match Play (1v1)',
+    tagline: 'Head-to-Head Bloodbath',
+    description: 'Traditional singles match play where there is nowhere to hide.',
     bullets: [
-      'Both players tee off. The team selects the best drive position and marks it.',
-      'From that spot forward, both partners play their own independent golf balls until they hole out.',
-      'The lowest single net score between the partners serves as the official team score on the hole.',
-      'Individual playing handicaps apply to each player and are calculated at 75% of course handicap. Strokes are given based on the hole difficulty index.',
-      'Low team score wins the hole. Most holes won wins the match!'
-    ]
-  },
-  'best ball': {
-    title: '1v1 & Fourball (Best Ball) Rules',
-    tagline: 'Pure Match Play Execution',
-    description: 'Traditional match play format testing individual consistency and partner ham-and-egging.',
-    bullets: [
-      'All players play their own independent golf ball from tee to green on every hole.',
-      'In Best Ball, partners compare net scores on the green. The lowest single net score becomes the team score.',
-      'Matches are tracked via traditional match play standing (e.g., 2 UP, 3 & 2, or All Square).',
-      'Handicap strokes are at 100% and applied individually based on the hole difficulty index.'
+      'Play your own ball from tee to green.',
+      'Handicaps: 100% of course handicap, normalized so the lower handicap player plays at a 0. Strokes given on hardest holes.',
+      'Lowest net score wins the hole. Matches tracked via standard match play standing.'
     ]
   }
 };

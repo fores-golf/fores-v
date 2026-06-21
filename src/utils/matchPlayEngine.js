@@ -1,213 +1,158 @@
-/**
- * PHASE 1 & 2: Baseline everyone to the lowest raw player, THEN apply format rules
- */
-export function calculatePlayingHandicaps(format, team1Players, team2Players) {
-  // 1. Get raw course handicaps
-  const t1p1Raw = team1Players[0]?.courseHandicap || 0;
-  const t1p2Raw = team1Players[1]?.courseHandicap || 0;
-  const t2p1Raw = team2Players[0]?.courseHandicap || 0;
-  const t2p2Raw = team2Players[1]?.courseHandicap || 0;
+// src/utils/matchPlayEngine.js
 
-  // 2. Find the absolute lowest raw handicap across ALL players
-  const allRaws = [t1p1Raw, t1p2Raw, t2p1Raw, t2p2Raw];
-  const lowestRaw = Math.min(...allRaws);
+export const calculatePlayingHandicaps = (formatName, team1, team2) => {
+  const format = String(formatName).trim().toLowerCase();
+  const allPlayers = [...team1, ...team2];
 
-  // 3. Baseline everyone down to scratch based on that lowest player
-  const t1p1Base = t1p1Raw - lowestRaw;
-  const t1p2Base = t1p2Raw - lowestRaw;
-  const t2p1Base = t2p1Raw - lowestRaw;
-  const t2p2Base = t2p2Raw - lowestRaw;
+  // -----------------------------------------------------
+  // 1. TEAM FORMATS (Scramble & Greensomes)
+  // -----------------------------------------------------
+  if (format === 'scramble' || format === 'greensomes') {
+    const calcTeamHcp = (team, pctLow, pctHigh) => {
+      if (!team || team.length === 0) return 0;
+      if (team.length === 1) return team[0].courseHandicap; // Fallback if playing solo
+      
+      // Sort handicaps lowest to highest
+      const hcps = team.map(p => p.courseHandicap).sort((a, b) => a - b);
+      return (hcps[0] * pctLow) + (hcps[1] * pctHigh);
+    };
 
-  const upperFormat = (format || '').toUpperCase();
+    let t1Hcp = 0;
+    let t2Hcp = 0;
 
-  // 4. Calculate formats using the NEW BASELINED handicaps
-  if (upperFormat === 'SCRAMBLE') {
-    const t1Hcp = team1Players.length > 1 
-      ? (0.35 * Math.min(t1p1Base, t1p2Base)) + (0.15 * Math.max(t1p1Base, t1p2Base)) 
-      : t1p1Base;
-    
-    const t2Hcp = team2Players.length > 1 
-      ? (0.35 * Math.min(t2p1Base, t2p2Base)) + (0.15 * Math.max(t2p1Base, t2p2Base)) 
-      : t2p1Base;
+    if (format === 'scramble') {
+      t1Hcp = calcTeamHcp(team1, 0.35, 0.15);
+      t2Hcp = calcTeamHcp(team2, 0.35, 0.15);
+    } else if (format === 'greensomes') {
+      t1Hcp = calcTeamHcp(team1, 0.60, 0.40);
+      t2Hcp = calcTeamHcp(team2, 0.60, 0.40);
+    }
 
     const roundedT1 = Math.round(t1Hcp);
     const roundedT2 = Math.round(t2Hcp);
-    const lowestTeam = Math.min(roundedT1, roundedT2);
+
+    // Normalize to 0 (Lowest team handicap goes to 0)
+    const minTeamHcp = Math.min(roundedT1, roundedT2);
 
     return {
-      team1Strokes: roundedT1 - lowestTeam,
-      team2Strokes: roundedT2 - lowestTeam,
-      type: 'team'
+      type: 'team',
+      team1Strokes: roundedT1 - minTeamHcp,
+      team2Strokes: roundedT2 - minTeamHcp
+    };
+  } 
+  
+  // -----------------------------------------------------
+  // 2. INDIVIDUAL FORMATS (Best Ball, Vegas, 1v1)
+  // -----------------------------------------------------
+  else {
+    let pct = 1.0;
+    if (format === 'best ball') pct = 0.90;
+    else if (format === 'vegas' || format === '1v1') pct = 1.0;
+    else if (format === 'shamble') pct = 0.75; // Left in just in case you use it!
+
+    // Calculate percent-cut individual handicaps
+    const rawHcps = allPlayers.map(p => ({
+      id: p.id,
+      hcp: Math.round(p.courseHandicap * pct)
+    }));
+
+    // Normalize to 0 (Lowest individual in the group goes to 0)
+    const minHcp = rawHcps.length > 0 ? Math.min(...rawHcps.map(p => p.hcp)) : 0;
+
+    const team1Data = {};
+    const team2Data = {};
+
+    rawHcps.forEach(p => {
+      const finalStrokes = p.hcp - minHcp;
+      if (p.id.startsWith('t1')) team1Data[p.id] = finalStrokes;
+      if (p.id.startsWith('t2')) team2Data[p.id] = finalStrokes;
+    });
+
+    return {
+      type: 'individual',
+      team1: team1Data,
+      team2: team2Data
     };
   }
+};
 
-  // 1v1, Shamble, or Vegas
-  const allowance = upperFormat === 'SHAMBLE' ? 0.60 : 1.0;
-  const strokes = { team1: {}, team2: {}, type: 'individual' };
-  
-  if (team1Players[0]) strokes.team1['t1p1'] = Math.round(t1p1Base * allowance);
-  if (team1Players[1]) strokes.team1['t1p2'] = Math.round(t1p2Base * allowance);
-  if (team2Players[0]) strokes.team2['t2p1'] = Math.round(t2p1Base * allowance);
-  if (team2Players[1]) strokes.team2['t2p2'] = Math.round(t2p2Base * allowance);
-
-  return strokes;
-}
-
-/**
- * Determines if an allocated stroke lands on a specific hole difficulty index
- */
-export function receivesStrokeOnHole(totalStrokesReceived, holeDifficultyIndex) {
-  if (totalStrokesReceived <= 0) return false;
-  let baseStrokes = Math.floor(totalStrokesReceived / 18);
-  const remainder = totalStrokesReceived % 18;
-  if (remainder >= holeDifficultyIndex) return true;
-  return baseStrokes > 0;
-}
-
-/**
- * PHASE 3: Stroke allocation based on Hole Difficulty
- */
-function getNetScore(grossScore, strokesReceived, holeDifficultyIndex) {
-  if (grossScore == null) return null;
-  let strokesOnThisHole = Math.floor(strokesReceived / 18);
-  const remainder = strokesReceived % 18;
-  if (remainder >= holeDifficultyIndex) strokesOnThisHole += 1;
-  return grossScore - strokesOnThisHole;
-}
-
-/**
- * Vegas Concatenation Engine
- */
-function getVegasScore(net1, net2) {
-  if (net1 == null || net2 == null) return null;
-  if (net1 >= 10 || net2 >= 10) {
-    const higher = Math.max(net1, net2);
-    const lower = Math.min(net1, net2);
-    return parseInt(`${higher}${lower}`, 10);
-  }
-  const lower = Math.min(net1, net2);
-  const higher = Math.max(net1, net2);
-  return parseInt(`${lower}${higher}`, 10);
-}
-
-/**
- * Evaluates the entire match status using a standard Match Play tracking index
- */
-export function evaluateMatchStatus(format, handicapData, allHolesData, holeScores) {
-  // 🎯 FIX: Track match play as a single unified net differential integer relative to square (0)
-  let matchDifferential = 0; 
+export const evaluateMatchStatus = (formatName, handicapData, matchHoles, netScoresPayload) => {
+  const format = String(formatName).trim().toLowerCase();
+  let team1Wins = 0;
+  let team2Wins = 0;
   let holesPlayed = 0;
 
-  const sortedHoles = [...allHolesData].sort((a, b) => a.hole_number - b.hole_number);
-  const upperFormat = (format || '').toUpperCase();
+  // Sort sequentially to process the match properly
+  const sortedScores = [...netScoresPayload].sort((a, b) => a.hole_number - b.hole_number);
 
-  for (const hole of sortedHoles) {
-    const holeData = holeScores.find(s => s.hole_id === hole.id || s.hole_number === hole.hole_number);
-    if (!holeData) continue; 
-
-    // 🎯 FIX: Check your exact JSON payload score attributes natively
-    const s_a = holeData.score_slanted_a;
-    const s_b = holeData.score_slanted_b;
-    const b_a = holeData.score_brothelmen_a;
-    const b_b = holeData.score_brothelmen_b;
-
-    if (s_a == null && s_b == null && b_a == null && b_b == null) continue;
+  sortedScores.forEach(score => {
+    const t1p1 = score.t1p1;
+    const t1p2 = score.t1p2;
+    const t2p1 = score.t2p1;
+    const t2p2 = score.t2p2;
 
     let t1Net = Infinity;
     let t2Net = Infinity;
 
-    if (handicapData.type === 'team') {
-      const t1Gross = Math.min(...[s_a, s_b].filter(s => s != null));
-      const t2Gross = Math.min(...[b_a, b_b].filter(s => s != null));
-      if (t1Gross !== Infinity && t2Gross !== Infinity) {
-        t1Net = getNetScore(t1Gross, handicapData.team1Strokes, hole.hcp_index);
-        t2Net = getNetScore(t2Gross, handicapData.team2Strokes, hole.hcp_index);
-        holesPlayed++;
-      }
-    } else if (upperFormat === 'VEGAS') {
-      // 🎯 FIX: Guard against hole 18 null entries from your payload data array safely
-      if (s_a == null || s_b == null || b_a == null || b_b == null) continue;
-
-      const t1p1Net = getNetScore(s_a, handicapData.team1['t1p1'] || 0, hole.hcp_index);
-      const t1p2Net = getNetScore(s_b, handicapData.team1['t1p2'] || 0, hole.hcp_index);
-      const t2p1Net = getNetScore(b_a, handicapData.team2['t2p1'] || 0, hole.hcp_index);
-      const t2p2Net = getNetScore(b_b, handicapData.team2['t2p2'] || 0, hole.hcp_index);
-
-      const t1Vegas = getVegasScore(t1p1Net, t1p2Net);
-      const t2Vegas = getVegasScore(t2p1Net, t2p2Net);
-
-      if (t1Vegas !== null && t2Vegas !== null) {
-        t1Net = t1Vegas;
-        t2Net = t2Vegas;
-        holesPlayed++;
-      }
-    } else {
-      const t1Nets = [];
-      if (s_a != null) t1Nets.push(getNetScore(s_a, handicapData.team1['t1p1'] || 0, hole.hcp_index));
-      if (s_b != null) t1Nets.push(getNetScore(s_b, handicapData.team1['t1p2'] || 0, hole.hcp_index));
-
-      const t2Nets = [];
-      if (b_a != null) t2Nets.push(getNetScore(b_a, handicapData.team2['t2p1'] || 0, hole.hcp_index));
-      if (b_b != null) t2Nets.push(getNetScore(b_b, handicapData.team2['t2p2'] || 0, hole.hcp_index));
-
-      if (t1Nets.length > 0 && t2Nets.length > 0) {
-        t1Net = Math.min(...t1Nets);
-        t2Net = Math.min(...t2Nets);
-        holesPlayed++;
-      }
-    }
-
-    // 🎯 FIX: Adjust the single match differential tracker (+1 for Clam wins, -1 for Brothelmen wins)
-    if (t1Net < t2Net) {
-      matchDifferential++;
-    } else if (t2Net < t1Net) {
-      matchDifferential--;
-    }
+    // 1. Single Score Formats (Team plays 1 ball, or 1v1)
+    if (format === 'scramble' || format === 'greensomes' || format === '1v1') {
+      if (t1p1 !== null) t1Net = t1p1;
+      if (t2p1 !== null) t2Net = t2p1;
+    } 
     
-    // Check for an early mathematical lock to stop checking holes if a team clinches early
-    const currentRemaining = 18 - holesPlayed;
-    if (Math.abs(matchDifferential) > currentRemaining) {
-      break;
+    // 2. Vegas Concatenation
+    else if (format === 'vegas') {
+      const getVegas = (n1, n2) => {
+        if (n1 == null || n2 == null) return Infinity; // Require both scores
+        const min = Math.min(n1, n2);
+        const max = Math.max(n1, n2);
+        // If a player shoots 10+, flip the order so the penalty hurts more
+        if (max >= 10) return parseInt(`${max}${min}`, 10);
+        return parseInt(`${min}${max}`, 10);
+      };
+      t1Net = getVegas(t1p1, t1p2);
+      t2Net = getVegas(t2p1, t2p2);
+    } 
+    
+    // 3. Best Ball (Lowest net of the two partners)
+    else {
+      const validT1 = [t1p1, t1p2].filter(n => n !== null);
+      const validT2 = [t2p1, t2p2].filter(n => n !== null);
+      if (validT1.length > 0) t1Net = Math.min(...validT1);
+      if (validT2.length > 0) t2Net = Math.min(...validT2);
     }
-  }
 
-  // Calculate Match Play Status from the single true lead tracker
+    // Determine Hole Winner
+    if (t1Net !== Infinity && t2Net !== Infinity) {
+      holesPlayed++;
+      if (t1Net < t2Net) team1Wins++;
+      else if (t2Net < t1Net) team2Wins++;
+    }
+  });
+
+  // Calculate Match Play Status String (e.g. "2 & 1")
+  let statusStr = 'AS';
+  const diff = Math.abs(team1Wins - team2Wins);
   const holesRemaining = 18 - holesPlayed;
-  let statusStr = "AS";
-  let isFinal = false;
 
-  if (matchDifferential > 0) {
-    const up = matchDifferential;
-    if (up > holesRemaining) {
-      statusStr = `Slanted Clams Win ${up} & ${holesRemaining}`;
-      isFinal = true;
-    } else if (up === holesRemaining && holesRemaining > 0) {
-      statusStr = `Clams Dormie ${up}`;
+  if (diff === 0) {
+    statusStr = holesPlayed === 18 ? 'TIE' : 'AS';
+  } else {
+    const leader = team1Wins > team2Wins ? 'Clams' : 'Brothelmen';
+    if (diff > holesRemaining) {
+      // Math clinch (e.g. 3 & 2)
+      statusStr = `${leader} Won ${diff} & ${holesRemaining}`;
     } else {
-      statusStr = `Slanted Clams ${up} UP`;
+      // Standard lead (e.g. 2 UP)
+      statusStr = `${leader} ${diff} UP`;
     }
-  } else if (matchDifferential < 0) {
-    const up = Math.abs(matchDifferential);
-    if (up > holesRemaining) {
-      // 🎯 FIX: Calculates proper structural margins (e.g. 5 & 4 instead of 5 & 0)
-      statusStr = `Clam Brothelmen Win ${up} & ${holesRemaining}`;
-      isFinal = true;
-    } else if (up === holesRemaining && holesRemaining > 0) {
-      statusStr = `Brothelmen Dormie ${up}`;
-    } else {
-      statusStr = `Clam Brothelmen ${up} UP`;
-    }
-  } else if (holesRemaining === 0) {
-    statusStr = "Halved";
-    isFinal = true;
   }
 
-  // Re-map synthetic return parameters expected by your layout views
-  return { 
-    team1Wins: matchDifferential > 0 ? matchDifferential : 0, 
-    team2Wins: matchDifferential < 0 ? Math.abs(matchDifferential) : 0, 
-    statusStr, 
-    isFinal,
-    holesPlayed 
+  return {
+    team1Wins,
+    team2Wins,
+    holesPlayed,
+    statusStr,
+    isClosedOut: diff > holesRemaining
   };
-}
+};

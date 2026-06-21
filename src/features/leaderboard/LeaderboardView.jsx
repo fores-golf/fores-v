@@ -6,11 +6,11 @@ import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matc
 
 // Metadata mapping for the UI
 const ROUND_METADATA = {
-  1: { date: 'June 25th', course: 'Quarry' },
-  2: { date: 'June 26th', course: 'Quarry' },
-  3: { date: 'June 26th', course: 'Legend' },
-  4: { date: 'June 27th', course: 'Legend' },
-  5: { date: 'June 27th', course: 'Quarry' }
+  1: { date: 'June 25th', parseDate: '2026-06-25', course: 'Quarry', format: 'Vegas' },
+  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry', format: 'Greensomes' },
+  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend', format: 'Best Ball' },
+  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend', format: 'Scramble' },
+  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry', format: '1v1' }
 };
 
 export function useLeaderboardData() {

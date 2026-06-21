@@ -6,13 +6,12 @@ import { supabase } from '../../config/supabaseClient';
 import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
 import LiveTicker from './LiveTicker'; // Ensure this path matches where you saved LiveTicker.jsx
 
-// Metadata mapping for the time-lock engine
 const ROUND_METADATA = {
-  1: { parseDate: '2026-06-25' },
-  2: { parseDate: '2026-06-26' },
-  3: { parseDate: '2026-06-26' },
-  4: { parseDate: '2026-06-27' },
-  5: { parseDate: '2026-06-27' }
+  1: { date: 'June 25th', parseDate: '2026-06-25', course: 'Quarry', format: 'Vegas' },
+  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry', format: 'Greensomes' },
+  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend', format: 'Best Ball' },
+  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend', format: 'Scramble' },
+  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry', format: '1v1' }
 };
 
 export default function DashboardView({ 
