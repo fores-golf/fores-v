@@ -4,7 +4,7 @@ import { supabase } from '../../config/supabaseClient';
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
 
-// 🎯 RESTORED: Metadata mapping for the UI
+// Metadata mapping for the UI
 const ROUND_METADATA = {
   1: { date: 'June 25th', course: 'Quarry' },
   2: { date: 'June 26th', course: 'Quarry' },
@@ -38,7 +38,8 @@ export function useLeaderboardData() {
           { data: holesData }
         ] = await Promise.all([
           supabase.from('teams').select('name, points'),
-          supabase.from('matches').select('id, round, format, status, course_id, team1_score, team2_score, team1_player1, team1_player2, team2_player1, team2_player2'),
+          // 🎯 CRITICAL FIX: is_live added here so the Ticker knows what is active!
+          supabase.from('matches').select('id, round, format, status, is_live, course_id, team1_score, team2_score, team1_player1, team1_player2, team2_player1, team2_player2'),
           supabase.from('players').select('id, auth_id, name, team, handicap'),
           supabase.from('hole_scores').select('*'),
           supabase.from('courses').select('id, name, slope, rating'),
@@ -182,7 +183,7 @@ export function useLeaderboardData() {
           setMatchHistory(mappedMatches);
         }
 
-        // 🎯 RESTORED: Full player map and individual stats second-pass calculation loops
+        // Individual stats calculation logic
         if (holeScoresData && holeScoresData.length > 0) {
           holeScoresData.forEach(score => {
             const pid = score.player_id || score.profile_id;
@@ -296,9 +297,12 @@ export default function LeaderboardView({ onBack }) {
   const t1Pct = (standings.team1.score / standings.totalAvailablePoints) * 100;
   const t2Pct = (standings.team2.score / standings.totalAvailablePoints) * 100;
 
+  // Sort live matches to the top
   const sortedMatchHistory = [...matchHistory].sort((a, b) => {
-    if (a.status === 'live' && b.status !== 'live') return -1;
-    if (b.status === 'live' && a.status !== 'live') return 1;
+    const aLive = a.is_live === true || a.is_live === 'true';
+    const bLive = b.is_live === true || b.is_live === 'true';
+    if (aLive && !bLive) return -1;
+    if (bLive && !aLive) return 1;
     return a.round - b.round;
   });
 
@@ -348,13 +352,17 @@ export default function LeaderboardView({ onBack }) {
               <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1">Match Analytics Matrix</h2>
               <div className="flex flex-col gap-3">
                 {sortedMatchHistory.map((match) => {
-                  const roundMeta = ROUND_METADATA[match.round] || { date: 'TBD', course: 'TBD' };
+                  const isCurrentlyLive = match.is_live === true || match.is_live === 'true';
+                  
                   return (
                     <div key={match.id} className="bg-white/5 border border-white/5 rounded-2xl p-4 shadow-md backdrop-blur-md flex flex-col gap-3">
                       <div className="flex justify-between items-center border-b border-white/5 pb-2">
                         <span className="text-[10px] font-black tracking-wider uppercase text-slate-400 bg-white/5 px-2 py-0.5 rounded border border-white/5">R{match.round} • {match.format}</span>
-                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded ${match.status === 'completed' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse'}`}>{match.status}</span>
+                        <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded ${match.status === 'completed' ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20' : isCurrentlyLive ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20 animate-pulse' : 'bg-white/5 text-slate-500 border border-white/10'}`}>
+                          {isCurrentlyLive ? 'Live' : match.status}
+                        </span>
                       </div>
+                      
                       <div className="flex justify-between items-center text-sm">
                         <div className="flex flex-col text-left w-[42%]"><span className="font-black text-slate-200 truncate">{match.team1_player1 || 'TBD'}</span>{match.team1_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team1_player2}</span>}</div>
                         <div className="flex items-center gap-2 bg-black/30 px-3 py-1.5 rounded-xl border border-white/5 font-black text-base tabular-nums shadow-inner">
@@ -364,6 +372,7 @@ export default function LeaderboardView({ onBack }) {
                         </div>
                         <div className="flex flex-col text-right w-[42%]"><span className="font-black text-slate-200 truncate">{match.team2_player1 || 'TBD'}</span>{match.team2_player2 && <span className="font-medium text-xs text-slate-500 truncate">{match.team2_player2}</span>}</div>
                       </div>
+                      
                       {match.team1_player1 && match.team2_player1 && (
                         <MatchProbabilityBar matchId={match.id} status={match.status} team1Name={match.team1_player1} team2Name={match.team2_player1} staticMode={true} />
                       )}
@@ -374,7 +383,6 @@ export default function LeaderboardView({ onBack }) {
             </section>
           </>
         ) : (
-          /* Individual Stats Tab View layout card mapping template renders dynamically below */
           <section className="space-y-3 animate-fade-in">
             <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 ml-1 flex justify-between items-center">
               <span>Individual Standings</span>

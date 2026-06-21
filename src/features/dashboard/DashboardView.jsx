@@ -4,6 +4,7 @@ import { useScheduleData } from '../schedule/hooks/useScheduleData';
 import { useChirpsNotification } from '../chat/hooks/useChirpsNotifications';
 import { supabase } from '../../config/supabaseClient';
 import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
+import LiveTicker from './LiveTicker'; // Ensure this path matches where you saved LiveTicker.jsx
 
 // Metadata mapping for the time-lock engine
 const ROUND_METADATA = {
@@ -160,6 +161,9 @@ export default function DashboardView({
           </div>
         </div>
       )}
+
+      {/* 🚀 INJECTED TICKER COMPONENT */}
+      <LiveTicker />
 
       {/* Atmospheric Illumination Background */}
       <div className="absolute top-[-5%] right-[-10%] w-[70%] h-[35%] bg-[#34d399]/10 blur-[130px] rounded-full pointer-events-none z-0 animate-pulse duration-[6000ms]"></div>

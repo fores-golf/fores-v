@@ -160,22 +160,29 @@ const runMonteCarloSimulation = async (matchData, iterations = 2500) => {
   return { playerA: roundedA, tie: roundedTie, playerB: 100 - roundedA - roundedTie };
 };
 
-export const useMatchData = (matchId, status) => {
+// 🎯 CRITICAL FIX: Passed staticMode into the hook definition
+export const useMatchData = (matchId, status, staticMode = false) => {
   const [matchData, setMatchData] = useState(null);
   const [probabilities, setProbabilities] = useState({ playerA: 0, playerB: 0, tie: 0 });
   const [isCalculating, setIsCalculating] = useState(true);
   const [generationTick, setGenerationTick] = useState(0);
 
   useEffect(() => {
-    if (!matchId) return;
+    // 🎯 CRITICAL FIX: Skip channel creation entirely if static mode is active
+    if (!matchId || staticMode) return; 
+
+    // Add random string to channel name to prevent identical components colliding
+    const uniqueChannelName = `live-odds-${matchId}-${Math.random().toString(36).substring(7)}`;
+
     const oddsSubscription = supabase
-      .channel(`live-odds-channel-${matchId}`)
+      .channel(uniqueChannelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hole_scores', filter: `matchup_id=eq.${matchId}` }, () => {
          setGenerationTick(prev => prev + 1);
       })
       .subscribe();
+      
     return () => { supabase.removeChannel(oddsSubscription); };
-  }, [matchId]);
+  }, [matchId, staticMode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -222,7 +229,6 @@ export const useMatchData = (matchId, status) => {
           completedHoleNums = scores.map(s => s.hole_number);
         }
 
-        // 🎯 FIX: Trust the database's explicit status or true completed lists
         const isCompleted = match.status === 'completed' || completedHoleNums.length >= 18;
 
         let currentMatchScore = 0;
@@ -233,7 +239,6 @@ export const useMatchData = (matchId, status) => {
           currentMatchScore = (parseInt(match.team1_score, 10) || 0) - (parseInt(match.team2_score, 10) || 0);
         }
 
-        // 🎯 FIX: upcoming unplayed matches with 0 scores get all 18 holes injected normally
         const unplayedHoles = isCompleted && completedHoleNums.length >= 18
           ? [] 
           : holes.filter(h => !completedHoleNums.includes(h.hole_number));
@@ -262,7 +267,8 @@ export const useMatchData = (matchId, status) => {
 
 export const MatchProbabilityBar = ({ matchId, status, team1Name, team2Name, variant = 'full', staticMode = false }) => {
   const { player } = useUser(); 
-  const { matchData, probabilities, isCalculating } = useMatchData(matchId, status);
+  // 🎯 CRITICAL FIX: Pass staticMode from the component props into the hook
+  const { matchData, probabilities, isCalculating } = useMatchData(matchId, status, staticMode);
 
   if (isCalculating || !matchData) {
     if (variant === 'micro') return <div className="h-2 mt-2 mb-1 w-full bg-slate-800 animate-pulse rounded-full" />;

@@ -235,6 +235,7 @@ export default function MatchScreen({ matchId, onBack }) {
   const handleScoreSave = async (scoreData) => {
     if (!activeHoleData || !matchId || !playerSlot) return;
 
+    // 1. Prepare and save the hole_score
     const upsertPayload = {
       matchup_id: matchId,        
       hole_id: activeHoleData.id,
@@ -250,7 +251,25 @@ export default function MatchScreen({ matchId, onBack }) {
     const { error } = await supabase.from('hole_scores').upsert(upsertPayload, { onConflict: 'matchup_id, hole_id' });
     if (error) return alert(error.message);
 
-   try {
+    // 2. BULLETPROOF STATUS FLIP - Execute immediately before complex math
+    try {
+      // Pull scores to check completion
+      const { data: currentScores } = await supabase.from('hole_scores').select('id').eq('matchup_id', matchId);
+      const isCompleteFallback = currentScores && currentScores.length >= 18;
+
+      await supabase
+        .from('matches')
+        .update({
+          is_live: !isCompleteFallback,
+          status: isCompleteFallback ? 'completed' : 'live'
+        })
+        .eq('id', matchId);
+    } catch (flipErr) {
+      console.error("Failed to force-flip match status:", flipErr);
+    }
+
+    // 3. Now run the complex Match Engine to determine numeric hole points
+    try {
       const { data: currentMatch } = await supabase.from('matches').select('*').eq('id', matchId).single();
       const { data: allMatchScores } = await supabase.from('hole_scores').select('*').eq('matchup_id', matchId);
       const { data: liveProfiles } = await supabase.from('players').select('id, auth_id, handicap');
@@ -272,7 +291,6 @@ export default function MatchScreen({ matchId, onBack }) {
 
         const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
 
-        // 🎯 FIX: Explicitly parse and normalize your exact custom row score properties
         const netScoresPayload = allMatchScores.map(scoreRow => {
           const holeMeta = allHoles.find(h => h.id === scoreRow.hole_id || h.hole_number === scoreRow.hole_number);
           const hcpIdx = holeMeta ? holeMeta.hcp_index : 18;
@@ -296,23 +314,19 @@ export default function MatchScreen({ matchId, onBack }) {
         const matchResult = evaluateMatchStatus(format, handicapData, allHoles, netScoresPayload);
         const isMatchOver = allMatchScores.length >= 18 || matchResult.statusStr.includes('&') || matchResult.statusStr.includes('Won');
 
-        let finalStatusText = matchResult.statusStr;
-        if (isMatchOver && !finalStatusText.includes('Clams') && !finalStatusText.includes('Brothelmen')) {
-          finalStatusText = matchResult.team1Wins > matchResult.team2Wins ? 'Slanted Clams Won' : 'Clam Brothelmen Won';
-        }
-
+        // Update the NUMERIC scores for the Leaderboard view 0 - 0 layout
         await supabase
           .from('matches')
           .update({
             is_live: !isMatchOver,
             status: isMatchOver ? 'completed' : 'live',
-            team1_score: finalStatusText, 
-            team2_score: finalStatusText
+            team1_score: matchResult.team1Wins || 0,
+            team2_score: matchResult.team2Wins || 0
           })
           .eq('id', matchId);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Match Math Engine Error:", err);
     }
 
     await syncAllScores();
