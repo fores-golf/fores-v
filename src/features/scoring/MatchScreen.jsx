@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import PremiumMapMatrix from '../course/PremiumMapMatrix';
 import ScoreEntrySheet from './ScoreEntrySheet';
-import MatchScorecardView from './MatchScorecardView'; 
+import MatchScorecardView from './matchScorecardView'; 
 import { supabase } from '../../config/supabaseClient';
 import { useUser } from '../../context/UserContext';
 import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
