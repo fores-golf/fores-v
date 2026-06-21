@@ -1,6 +1,6 @@
 import React from 'react';
 // IMPORTANT: Adjust these import paths to match exactly where these files live in your project
-import { useLeaderboardData } from '../leaderboard/leaderboardView'; 
+import { useLeaderboardData } from '../leaderboard/LeaderboardView'; 
 import { MatchProbabilityBar } from '../probability/probability_engine';
 
 export default function LiveTicker() {
