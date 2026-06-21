@@ -6,11 +6,62 @@ import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matc
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
 const ROUND_METADATA = {
-  1: { date: 'June 25th', parseDate: '2026-06-25', course: 'Quarry' },
-  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry' },
-  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend' },
-  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend' },
-  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry' }
+  1: { date: 'June 25th', parseDate: '2026-06-25', course: 'Quarry', format: 'Vegas' },
+  2: { date: 'June 26th', parseDate: '2026-06-26', course: 'Quarry', format: 'Scramble' },
+  3: { date: 'June 26th', parseDate: '2026-06-26', course: 'Legend', format: 'Shamble' },
+  4: { date: 'June 27th', parseDate: '2026-06-27', course: 'Legend', format: 'Best Ball' },
+  5: { date: 'June 27th', parseDate: '2026-06-27', course: 'Quarry', format: 'Vegas' }
+};
+
+// Tournament format rulebooks - Synchronized with your custom provisions
+const FORMAT_RULES = {
+  'vegas': {
+    title: 'Vegas Rules',
+    tagline: 'Team Point Accumulation Matrix',
+    description: 'A high-stakes format where partner scores are concatenated rather than added together.',
+    bullets: [
+      'Partner scores are paired side-by-side to form a 2-digit number (e.g., net 4 and net 5 becomes a 45).',
+      'The lowest net score always fills the tens digit position (e.g., if you shoot a 6 and your partner shoots a 4, your team score is 46).',
+      'Exception: If any player records a double digit net score (10 or higher), the numbers are concatenated with the HIGHER number first.',
+      'Handicaps are at 100% of course handicap, normalizing to lowest handicap of the group. Strokes are applied for the other 3 golfers to holes based on difficulty index.',
+      'The lower two digit number wins the hole. Most holes won wins the match!'
+    ]
+  },
+  'scramble': {
+    title: '2-Man Scramble Rules',
+    tagline: 'Let your partner bail you out on every shot',
+    description: 'A classic format optimized for aggressive lines and low scores.',
+    bullets: [
+      'Both players tee off. The team selects the best drive position and marks it.',
+      'Both players hit their next shots from within one club-length of the selected spot. No closer to the hole. No changing lie (can\'t go rough -> fairway).',
+      'This process repeats until the ball is holed out.',
+      'Team handicaps are created by taking 15% of the higher handicap and 35% of the lower handicap. Strokes are applied to holes based on difficulty index.',
+      'Low team score wins the hole. Most holes won wins the match!'
+    ]
+  },
+  'shamble': {
+    title: '2-Man Shamble Rules',
+    tagline: 'Let your partner bail your out off the tee',
+    description: 'A dynamic hybrid combining scramble advantages with individual match execution.',
+    bullets: [
+      'Both players tee off. The team selects the best drive position and marks it.',
+      'From that spot forward, both partners play their own independent golf balls until they hole out.',
+      'The lowest single net score between the partners serves as the official team score on the hole.',
+      'Individual playing handicaps apply to each player and are calculated at 75% of course handicap. Strokes are given based on the hole difficulty index.',
+      'Low team score wins the hole. Most holes won wins the match!'
+    ]
+  },
+  'best ball': {
+    title: '1v1 & Fourball (Best Ball) Rules',
+    tagline: 'Pure Match Play Execution',
+    description: 'Traditional match play format testing individual consistency and partner ham-and-egging.',
+    bullets: [
+      'All players play their own independent golf ball from tee to green on every hole.',
+      'In Best Ball, partners compare net scores on the green. The lowest single net score becomes the team score.',
+      'Matches are tracked via traditional match play standing (e.g., 2 UP, 3 & 2, or All Square).',
+      'Handicap strokes are at 100% and applied individually based on the hole difficulty index.'
+    ]
+  }
 };
 
 export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
@@ -24,10 +75,13 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   const [allHoleScores, setAllHoleScores] = useState([]);
   const [courseHoles, setCourseHoles] = useState([]);
 
+  // State to control the Round Rules modal sheet overlay
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
+
   const fetchLiveScoresAndHoles = async () => {
     try {
       const { data: scores } = await supabase.from('hole_scores').select('*');
-      const { data: holes } = await supabase.from('holes').select('*'); // Load all course holes
+      const { data: holes } = await supabase.from('holes').select('*');
       if (scores) setAllHoleScores(scores);
       if (holes) setCourseHoles(holes);
     } catch (err) {
@@ -47,7 +101,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
       .subscribe();
 
     const scoresSub = supabase
-      .channel('schedule-scores-tracker')
+      .channel('schedule-scores-tracker', { config: { broadcast: { self: true } } })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hole_scores' }, () => {
         refreshMatches();
         fetchLiveScoresAndHoles();
@@ -73,9 +127,9 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     String(player?.auth_id).trim().toLowerCase() === HARDCODED_ADMIN_ID || 
     String(player?.id).trim().toLowerCase() === HARDCODED_ADMIN_ID;
 
-  const isClamsCaptain = isUserExplicitAdmin || player?.name?.includes('Kevin Gurney');
-  const isBrothelmenCaptain = isUserExplicitAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274';
-  const isAnyCaptain = isClamsCaptain || isBrothelmenCaptain;
+  const isAnyCaptain = isUserExplicitAdmin || 
+    player?.name?.includes('Kevin Gurney') || 
+    player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274';
 
   const team1Options = golfers.filter(g => g.team === 'Slanted Clams');
   const team2Options = golfers.filter(g => g.team === 'Clam Brothelmen');
@@ -106,11 +160,11 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     setIsProcessing(true);
     try {
       const updates = {};
-      if (isClamsCaptain) {
+      if (isUserExplicitAdmin || player?.name?.includes('Kevin Gurney')) {
         updates.team1_player1 = editForm.t1p1 || null;
         updates.team1_player2 = editForm.t1p2 || null;
       }
-      if (isBrothelmenCaptain) {
+      if (isUserExplicitAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274') {
         updates.team2_player1 = editForm.t2p1 || null;
         updates.team2_player2 = editForm.t2p2 || null;
       }
@@ -164,23 +218,96 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   };
 
   const displayedMatches = allMatches.filter(m => m.round === activeRound).sort((a, b) => (a.tee_time || '').localeCompare(b.tee_time || ''));
+  
+  const activeRoundFormatName = ROUND_METADATA[activeRound]?.format || 'Vegas';
+  const activeRules = FORMAT_RULES[activeRoundFormatName.toLowerCase()] || FORMAT_RULES['vegas'];
 
   return (
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans flex flex-col pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
+      
+      {/* Dynamic Header View */}
       <div className="px-5 py-4 flex justify-between items-center bg-[#0f172a]/90 backdrop-blur-xl border-b border-white/5 sticky top-0 z-20">
         <button onClick={onBack} className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 active:scale-95 transition-transform">◀ Hub</button>
-        <h1 className="font-black text-lg tracking-tight uppercase italic " >Tournament Log</h1>
+        <h1 className="font-black text-lg tracking-tight uppercase italic">Tournament Log</h1>
         <div className="w-12"></div>
       </div>
 
-      <div className="bg-[#0f172a]/95 backdrop-blur-xl border-b border-white/5 sticky top-[60px] z-10">
-        <div className="px-5 py-3 flex gap-2 overflow-x-auto max-w-md mx-auto no-scrollbar">
+      {/* Round Switcher and Rules Bar Area */}
+      <div className="bg-[#0f172a]/95 backdrop-blur-xl border-b border-white/5 sticky top-[60px] z-10 flex flex-col items-center">
+        <div className="px-5 py-3 flex gap-2 overflow-x-auto max-w-md w-full no-scrollbar">
           {[1,2,3,4,5].map((r) => (
-            <button key={r} onClick={() => setActiveRound(r)} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 ${activeRound === r ? 'bg-amber-500 text-black shadow-lg' : 'bg-white/5 text-slate-400 border border-white/5'}`}>Round {r}</button>
+            <button key={r} onClick={() => { setActiveRound(r); }} className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all shrink-0 ${activeRound === r ? 'bg-amber-500 text-black shadow-lg' : 'bg-white/5 text-slate-400 border border-white/5'}`}>Round {r}</button>
           ))}
+        </div>
+        
+        {/* Rulebook Action Access Button */}
+        <div className="w-full max-w-md px-5 pb-3">
+          <button 
+            onClick={() => setIsRulesModalOpen(true)}
+            className="w-full py-2.5 bg-gradient-to-r from-blue-900/40 to-indigo-900/40 border border-blue-500/20 rounded-xl flex items-center justify-center gap-2 hover:border-blue-500/40 transition-colors shadow-inner active:scale-[0.99]"
+          >
+            <span className="text-base select-none">📋</span>
+            <span className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-400">
+              Review Round {activeRound} Rules ({activeRoundFormatName})
+            </span>
+          </button>
         </div>
       </div>
 
+      {/* --- MODAL RULEBOOK OVERLAY --- */}
+      {isRulesModalOpen && (
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
+          <div className="bg-[#121827] border border-white/10 rounded-[2rem] w-full max-w-sm max-h-[80vh] overflow-y-auto p-6 relative shadow-2xl flex flex-col gap-5">
+            
+            <div className="flex justify-between items-start">
+              <div className="space-y-1">
+                <span className="text-[8px] font-mono font-black text-amber-400 border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 rounded">
+                  Round {activeRound} Format
+                </span>
+                <h2 className="text-2xl font-black uppercase italic tracking-tight text-white mt-1">
+                  {activeRules.title}
+                </h2>
+                <p className="text-[10px] font-bold text-[#34d399] uppercase tracking-widest leading-none">
+                  {activeRules.tagline}
+                </p>
+              </div>
+              <button 
+                onClick={() => setIsRulesModalOpen(false)}
+                className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center font-black text-xs text-slate-400 active:scale-90"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 font-medium leading-relaxed bg-black/20 p-3.5 rounded-xl border border-white/5">
+              {activeRules.description}
+            </p>
+
+            <div className="space-y-3">
+              <h3 className="text-[9px] font-black uppercase tracking-[0.18em] text-slate-500 pl-0.5">Gameplay Provisions</h3>
+              <div className="flex flex-col gap-2.5">
+                {activeRules.bullets.map((bullet, idx) => (
+                  <div key={idx} className="flex gap-3 items-start bg-slate-950/40 p-3 rounded-xl border border-white/[0.02]">
+                    <span className="w-5 h-5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[10px] font-mono font-black flex items-center justify-center shrink-0 mt-0.5 select-none">
+                      {idx + 1}
+                    </span>
+                    <p className="text-xs text-slate-400 font-medium leading-normal">{bullet}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setIsRulesModalOpen(false)}
+              className="w-full py-3 bg-amber-500 text-black font-black text-xs uppercase tracking-widest rounded-xl shadow-lg shadow-amber-500/10 active:scale-[0.98] transition-transform mt-2"
+            >
+              Acknowledged / Return to Log
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Log Listing Feed */}
       <main className="p-5 flex flex-col gap-4 max-w-md mx-auto w-full flex-1">
         {displayedMatches.map((match) => {
           const cleanIsMe = (ref) => {
@@ -213,7 +340,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
           const format = match.format || '1v1';
           const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
 
-          // 🎯 FIX: Force live layout rendering directly from scores array to overwrite old '5&0' text rows
           const renderLiveStatusString = () => {
             const currentMatchScores = allHoleScores.filter(s => s.matchup_id === match.id);
             const matchHoles = courseHoles.filter(h => h.course_id === (match.course_id || 1));
@@ -222,7 +348,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
               return 'AS // TEE 1';
             }
 
-            // Map custom schema property fields to standard evaluation keys
             const netScoresPayload = currentMatchScores.map(row => {
               const hMeta = matchHoles.find(h => h.id === row.hole_id || h.hole_number === row.hole_number);
               const hIdx = hMeta ? hMeta.hcp_index : 18;
@@ -248,7 +373,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
             
             if (evalResult.holesPlayed === 0) return 'AS // TEE 1';
             if (isFinished) {
-              // Custom text formatting fallback boundary rules
               if (!evalResult.statusStr.includes('Clams') && !evalResult.statusStr.includes('Brothelmen') && evalResult.statusStr !== 'AS') {
                 return evalResult.team1Wins > evalResult.team2Wins ? 'Slanted Clams Won (Final)' : 'Clam Brothelmen Won (Final)';
               }
@@ -286,7 +410,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
               <div className="grid grid-cols-2 gap-4 items-center bg-black/20 p-3 rounded-xl border border-white/5">
                 <div>
                   <span className="text-[9px] font-black uppercase text-blue-400 block mb-1">Slanted Clams</span>
-                  {isEditing && isClamsCaptain ? (
+                  {isEditing && (isUserExplicitAdmin || player?.name?.includes('Kevin Gurney')) ? (
                     <div className="space-y-2 mt-2">
                       <select value={editForm.t1p1} onChange={(e) => setEditForm({...editForm, t1p1: e.target.value})} className="w-full bg-black/40 border border-blue-500/30 rounded p-1.5 text-xs text-white">
                         <option value="">Select Lead...</option>
@@ -319,7 +443,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                 
                 <div className="text-right border-l border-white/5 pl-4">
                   <span className="text-[9px] font-black uppercase text-red-400 block mb-1">Brothelmen</span>
-                  {isEditing && isBrothelmenCaptain ? (
+                  {isEditing && (isUserExplicitAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274') ? (
                     <div className="space-y-2 mt-2">
                       <select value={editForm.t2p1} onChange={(e) => setEditForm({...editForm, t2p1: e.target.value})} className="w-full bg-black/40 border border-red-500/30 rounded p-1.5 text-xs text-white">
                         <option value="">Select Lead...</option>
