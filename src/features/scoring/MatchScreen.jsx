@@ -75,20 +75,6 @@ export default function MatchScreen({ matchId, onBack }) {
         const p4 = getProfile(match.team2_player2);
 
         const format = match.format || '1v1';
-        
-        // 🎯 MAP NAMES DIRECTLY INTO INSIGHTS INSTEAD OF UUIDS
-        setMatchInsights({
-          matchupId: matchId,
-          status: `${match.team1_score || 0} vs ${match.team2_score || 0}`,
-          wagerStatus: format.toUpperCase(),
-          matchState: match.status,
-          team1Name: p1 ? p1.name : 'TBD',
-          team2Name: p3 ? p3.name : 'TBD',
-          t1p1: p1 ? p1.id : null,
-          t1p2: p2 ? p2.id : null,
-          t2p1: p3 ? p3.id : null,
-          t2p2: p4 ? p4.id : null,
-        });
 
         if (profiles && profiles.length > 0) {
           const team1Arr = [];
@@ -101,6 +87,29 @@ export default function MatchScreen({ matchId, onBack }) {
 
           const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
 
+          // 🎯 MERGE STROKES DIRECTLY INTO INSIGHTS
+          setMatchInsights({
+            matchupId: matchId,
+            status: `${match.team1_score || 0} vs ${match.team2_score || 0}`,
+            wagerStatus: format.toUpperCase(),
+            matchState: match.status,
+            team1Name: p1 ? p1.name : 'TBD',
+            team2Name: p3 ? p3.name : 'TBD',
+            t1p1: p1 ? p1.id : null,
+            t1p2: p2 ? p2.id : null,
+            t2p1: p3 ? p3.id : null,
+            t2p2: p4 ? p4.id : null,
+            // --- Stroke Data for Child Components ---
+            strokesType: handicapData.type,
+            team1Strokes: handicapData.type === 'team' ? handicapData.team1Strokes : 0,
+            team2Strokes: handicapData.type === 'team' ? handicapData.team2Strokes : 0,
+            t1p1Strokes: handicapData.type === 'individual' ? handicapData.team1?.t1p1 || 0 : 0,
+            t1p2Strokes: handicapData.type === 'individual' ? handicapData.team1?.t1p2 || 0 : 0,
+            t2p1Strokes: handicapData.type === 'individual' ? handicapData.team2?.t2p1 || 0 : 0,
+            t2p2Strokes: handicapData.type === 'individual' ? handicapData.team2?.t2p2 || 0 : 0,
+          });
+
+          // UPDATE HEADER BADGE
           if (handicapData.type === 'team') {
             if (handicapData.team1Strokes > 0) {
               setCalculatedStrokes({ text: `Clams getting ${handicapData.team1Strokes} strokes`, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5' });
@@ -110,14 +119,15 @@ export default function MatchScreen({ matchId, onBack }) {
               setCalculatedStrokes({ text: 'Heads Up (Scratch)', color: 'text-slate-400 border-white/5 bg-white/5' });
             }
           } else {
-            const t1Max = handicapData.team1 ? Math.max(...Object.values(handicapData.team1), 0) : 0;
-            const t2Max = handicapData.team2 ? Math.max(...Object.values(handicapData.team2), 0) : 0;
-            if (t1Max > t2Max) {
-              setCalculatedStrokes({ text: `Clams getting up to ${t1Max} strokes`, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5' });
-            } else if (t2Max > t1Max) {
-              setCalculatedStrokes({ text: `Brothelmen getting up to ${t2Max} strokes`, color: 'text-red-400 border-red-500/20 bg-red-500/5' });
+            const maxStrokes = Math.max(
+              ...Object.values(handicapData.team1 || {}), 
+              ...Object.values(handicapData.team2 || {})
+            );
+
+            if (maxStrokes > 0) {
+              setCalculatedStrokes({ text: 'Individual Strokes Applied', color: 'text-amber-400 border-amber-500/20 bg-amber-500/5' });
             } else {
-              setCalculatedStrokes({ text: 'Match is Scratch', color: 'text-slate-400 border-white/5 bg-white/5' });
+              setCalculatedStrokes({ text: 'All Players Scratch', color: 'text-slate-400 border-white/5 bg-white/5' });
             }
           }
         }

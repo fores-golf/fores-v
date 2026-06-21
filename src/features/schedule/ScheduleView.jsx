@@ -44,7 +44,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     return new Date().getTime() >= (new Date(matchDateStr).getTime() - (30 * 60 * 1000));
   };
 
-  // 🎯 CORE FIX: The universal lookup tool. Checks auth_id first, fallback to id.
   const resolveGolfer = (refId) => {
     if (!refId) return null;
     const target = String(refId).trim().toLowerCase();
@@ -59,13 +58,12 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     return golfer ? golfer.name : 'TBD';
   };
 
-  // Maps the current match value to the dropdown correctly so it doesn't show blank
   const getDropdownValue = (refId) => {
     const golfer = resolveGolfer(refId);
     return golfer ? (golfer.auth_id || golfer.id) : '';
   };
 
-  const handleGenerateSkeleton = async () => { /* ... unchanged ... */ };
+  const handleGenerateSkeleton = async () => { /* ... */ };
   
   const handleSaveRoster = async (matchId) => {
     setIsProcessing(true);
@@ -95,7 +93,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     }
   };
 
-  const handleResetMatch = async (matchId) => { /* ... unchanged ... */ };
+  const handleResetMatch = async (matchId) => { /* ... */ };
 
   const startEditing = (match) => {
     setEditingMatchId(match.id);
@@ -110,37 +108,26 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
 
   const formatDisplayTime = (t) => t ? new Date(`2000-01-01T${t}`).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'TBD';
 
-  const getStrokeChipLayout = (match) => {
+  // 🎯 REFACTORED to take handicapData directly so we don't calculate it twice
+  const getStrokeChipLayout = (handicapData, isAssigned) => {
     if (!golfers || golfers.length === 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-500 animate-pulse">Syncing...</span>;
-    if (!match.team1_player1 && !match.team2_player1) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Unassigned</span>;
-
-    const t1p1 = resolveGolfer(match.team1_player1);
-    const t1p2 = resolveGolfer(match.team1_player2);
-    const t2p1 = resolveGolfer(match.team2_player1);
-    const t2p2 = resolveGolfer(match.team2_player2);
-
-    const team1Arr = [];
-    if (t1p1) team1Arr.push({ id: 't1p1', courseHandicap: parseInt(t1p1.handicap, 10) || 0 });
-    if (t1p2) team1Arr.push({ id: 't1p2', courseHandicap: parseInt(t1p2.handicap, 10) || 0 });
-
-    const team2Arr = [];
-    if (t2p1) team2Arr.push({ id: 't2p1', courseHandicap: parseInt(t2p1.handicap, 10) || 0 });
-    if (t2p2) team2Arr.push({ id: 't2p2', courseHandicap: parseInt(t2p2.handicap, 10) || 0 });
-
-    const format = match.format || '1v1';
-    const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
+    if (!isAssigned) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Unassigned</span>;
 
     if (handicapData.type === 'team') {
       if (handicapData.team1Strokes > 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-blue-500/20 bg-blue-500/5 text-blue-400">Clams +{handicapData.team1Strokes} Strokes</span>;
       if (handicapData.team2Strokes > 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-red-500/20 bg-red-500/5 text-red-400">Brothelmen +{handicapData.team2Strokes} Strokes</span>;
     } else {
-      const t1Max = handicapData.team1 ? Math.max(...Object.values(handicapData.team1), 0) : 0;
-      const t2Max = handicapData.team2 ? Math.max(...Object.values(handicapData.team2), 0) : 0;
-      if (t1Max > 0 || t2Max > 0) {
-        if (t1Max >= t2Max) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-blue-500/20 bg-blue-500/5 text-blue-400">Clams getting up to {t1Max} stks</span>;
-        return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-red-500/20 bg-red-500/5 text-red-400">Brothelmen getting up to {t2Max} stks</span>;
+      const t1Vals = handicapData.team1 ? Object.values(handicapData.team1) : [];
+      const t2Vals = handicapData.team2 ? Object.values(handicapData.team2) : [];
+      const allVals = [...t1Vals, ...t2Vals];
+      
+      const maxStrokes = allVals.length > 0 ? Math.max(...allVals) : 0;
+
+      if (maxStrokes > 0) {
+        return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-amber-500/20 bg-amber-500/5 text-amber-400">Individual Strokes</span>;
       }
     }
+    
     return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Scratch Match</span>;
   };
 
@@ -164,7 +151,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
 
       <main className="p-5 flex flex-col gap-4 max-w-md mx-auto w-full flex-1">
         {displayedMatches.map((match) => {
-          // Verify if the current user is in this match using the universal resolver
           const me = resolveGolfer(player?.auth_id || player?.id);
           const isMyMatch = me && [match.team1_player1, match.team1_player2, match.team2_player1, match.team2_player2].some(ref => {
             const g = resolveGolfer(ref);
@@ -174,6 +160,24 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
           const isMatchTimeReady = isMatchReadyToStart(match.round, match.tee_time);
           const isEditing = editingMatchId === match.id;
           const canEdit = isAdmin || (isAnyCaptain && match.status === 'scheduled' && !match.is_live);
+          const isAssigned = match.team1_player1 || match.team2_player1;
+
+          // 🎯 CALCULATE HANDICAP DATA RIGHT HERE FOR THE WHOLE CARD
+          const t1p1 = resolveGolfer(match.team1_player1);
+          const t1p2 = resolveGolfer(match.team1_player2);
+          const t2p1 = resolveGolfer(match.team2_player1);
+          const t2p2 = resolveGolfer(match.team2_player2);
+
+          const team1Arr = [];
+          if (t1p1) team1Arr.push({ id: 't1p1', courseHandicap: parseInt(t1p1.handicap, 10) || 0 });
+          if (t1p2) team1Arr.push({ id: 't1p2', courseHandicap: parseInt(t1p2.handicap, 10) || 0 });
+
+          const team2Arr = [];
+          if (t2p1) team2Arr.push({ id: 't2p1', courseHandicap: parseInt(t2p1.handicap, 10) || 0 });
+          if (t2p2) team2Arr.push({ id: 't2p2', courseHandicap: parseInt(t2p2.handicap, 10) || 0 });
+
+          const format = match.format || '1v1';
+          const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
 
           return (
             <div key={match.id} className={`bg-[#121827] rounded-2xl p-4 border relative overflow-hidden flex flex-col gap-4 transition-all ${isMyMatch && !isEditing ? 'border-[#34d399]/40 shadow-lg' : 'border-white/5'}`}>
@@ -188,10 +192,10 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                   <span className="text-slate-300 font-mono font-bold">{formatDisplayTime(match.tee_time)}</span>
                   <span className="text-slate-700 font-black">•</span>
                   <span className="text-amber-500/80 mr-1">{ROUND_METADATA[activeRound]?.course}</span>
-                  {!isEditing && getStrokeChipLayout(match)}
+                  {!isEditing && getStrokeChipLayout(handicapData, isAssigned)}
                 </div>
                 
-                {!isEditing && canEdit && <button onClick={() => startEditing(match)} className="text-amber-500 hover:text-amber-400 bg-amber-500/10 px-2 py-1 rounded transition-colors">{match.team1_player1 ? 'Edit' : 'Assign'}</button>}
+                {!isEditing && canEdit && <button onClick={() => startEditing(match)} className="text-amber-500 hover:text-amber-400 bg-amber-500/10 px-2 py-1 rounded transition-colors">{isAssigned ? 'Edit' : 'Assign'}</button>}
                 {isEditing && (
                   <div className="flex items-center gap-2">
                     {isAdmin && <button onClick={() => handleResetMatch(match.id)} disabled={isProcessing} className="text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded active:scale-95 transition-all">Reset</button>}
@@ -203,7 +207,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
 
               <div className="grid grid-cols-2 gap-4 items-center bg-black/20 p-3 rounded-xl border border-white/5">
                 <div>
-                  <span className="text-[9px] font-black uppercase text-blue-400 block">Slanted Clams</span>
+                  <span className="text-[9px] font-black uppercase text-blue-400 block mb-1">Slanted Clams</span>
                   {isEditing && isClamsCaptain ? (
                     <div className="space-y-2 mt-2">
                       <select value={editForm.t1p1} onChange={(e) => setEditForm({...editForm, t1p1: e.target.value})} className="w-full bg-black/40 border border-blue-500/30 rounded p-1.5 text-xs text-white">
@@ -217,13 +221,25 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                     </div>
                   ) : (
                     <>
-                      <div className="text-sm font-black text-white truncate">{getGolferName(match.team1_player1)}</div>
-                      <div className="text-xs text-slate-400 truncate">{match.team1_player2 ? getGolferName(match.team1_player2) : ''}</div>
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <div className="text-sm font-black text-white truncate">{getGolferName(match.team1_player1)}</div>
+                        {!isEditing && handicapData?.type === 'individual' && handicapData.team1?.t1p1 > 0 && (
+                          <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team1.t1p1}</span>
+                        )}
+                      </div>
+                      {match.team1_player2 && (
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-xs text-slate-400 truncate">{getGolferName(match.team1_player2)}</div>
+                          {!isEditing && handicapData?.type === 'individual' && handicapData.team1?.t1p2 > 0 && (
+                            <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team1.t1p2}</span>
+                          )}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
                 <div className="text-right border-l border-white/5 pl-4">
-                  <span className="text-[9px] font-black uppercase text-red-400 block">Brothelmen</span>
+                  <span className="text-[9px] font-black uppercase text-red-400 block mb-1">Brothelmen</span>
                   {isEditing && isBrothelmenCaptain ? (
                     <div className="space-y-2 mt-2">
                       <select value={editForm.t2p1} onChange={(e) => setEditForm({...editForm, t2p1: e.target.value})} className="w-full bg-black/40 border border-red-500/30 rounded p-1.5 text-xs text-white">
@@ -237,8 +253,20 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                     </div>
                   ) : (
                     <>
-                      <div className="text-sm font-black text-white truncate">{getGolferName(match.team2_player1)}</div>
-                      <div className="text-xs text-slate-400 truncate">{match.team2_player2 ? getGolferName(match.team2_player2) : ''}</div>
+                      <div className="flex items-center justify-end gap-1.5 mb-0.5">
+                        <div className="text-sm font-black text-white truncate">{getGolferName(match.team2_player1)}</div>
+                        {!isEditing && handicapData?.type === 'individual' && handicapData.team2?.t2p1 > 0 && (
+                          <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team2.t2p1}</span>
+                        )}
+                      </div>
+                      {match.team2_player2 && (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="text-xs text-slate-400 truncate">{getGolferName(match.team2_player2)}</div>
+                          {!isEditing && handicapData?.type === 'individual' && handicapData.team2?.t2p2 > 0 && (
+                            <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team2.t2p2}</span>
+                          )}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
