@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useScheduleData } from './hooks/useScheduleData';
 import { useUser } from '../../context/UserContext';
 import { supabase } from '../../config/supabaseClient';
-import { calculatePlayingHandicaps } from '../../utils/matchPlayEngine';
+import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
 const ROUND_METADATA = {
@@ -20,6 +20,45 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [editingMatchId, setEditingMatchId] = useState(null);
   const [editForm, setEditForm] = useState({ t1p1: '', t1p2: '', t2p1: '', t2p2: '', format: '' });
+  
+  const [allHoleScores, setAllHoleScores] = useState([]);
+  const [courseHoles, setCourseHoles] = useState([]);
+
+  const fetchLiveScoresAndHoles = async () => {
+    try {
+      const { data: scores } = await supabase.from('hole_scores').select('*');
+      const { data: holes } = await supabase.from('holes').select('*').eq('course_id', 1);
+      if (scores) setAllHoleScores(scores);
+      if (holes) setCourseHoles(holes);
+    } catch (err) {
+      console.warn("Schedule log scorecard tracker skipped:", err.message);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveScoresAndHoles();
+
+    const matchSub = supabase
+      .channel('schedule-matches-tracker')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => {
+        refreshMatches();
+        fetchLiveScoresAndHoles();
+      })
+      .subscribe();
+
+    const scoresSub = supabase
+      .channel('schedule-scores-tracker')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hole_scores' }, () => {
+        refreshMatches();
+        fetchLiveScoresAndHoles();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(matchSub);
+      supabase.removeChannel(scoresSub);
+    };
+  }, [refreshMatches]);
 
   if (loading) {
     return (
@@ -29,8 +68,13 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     );
   }
 
-  const isClamsCaptain = isAdmin || player?.name?.includes('Kevin Gurney');
-  const isBrothelmenCaptain = isAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274';
+  const HARDCODED_ADMIN_ID = '2889dad2-6a62-41e5-85be-8f8f5f88c893';
+  const isUserExplicitAdmin = isAdmin || 
+    String(player?.auth_id).trim().toLowerCase() === HARDCODED_ADMIN_ID || 
+    String(player?.id).trim().toLowerCase() === HARDCODED_ADMIN_ID;
+
+  const isClamsCaptain = isUserExplicitAdmin || player?.name?.includes('Kevin Gurney');
+  const isBrothelmenCaptain = isUserExplicitAdmin || player?.id === '194b99e6-cbe6-40f4-8286-5b939e249274';
   const isAnyCaptain = isClamsCaptain || isBrothelmenCaptain;
 
   const team1Options = golfers.filter(g => g.team === 'Slanted Clams');
@@ -63,8 +107,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     return golfer ? (golfer.auth_id || golfer.id) : '';
   };
 
-  const handleGenerateSkeleton = async () => { /* ... */ };
-  
   const handleSaveRoster = async (matchId) => {
     setIsProcessing(true);
     try {
@@ -77,7 +119,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
         updates.team2_player1 = editForm.t2p1 || null;
         updates.team2_player2 = editForm.t2p2 || null;
       }
-      if (isAdmin) {
+      if (isUserExplicitAdmin) {
         updates.format = editForm.format || 'TBD';
       }
 
@@ -93,22 +135,8 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     }
   };
 
-  const handleResetMatch = async (matchId) => { /* ... */ };
-
-  const startEditing = (match) => {
-    setEditingMatchId(match.id);
-    setEditForm({
-      t1p1: getDropdownValue(match.team1_player1),
-      t1p2: getDropdownValue(match.team1_player2),
-      t2p1: getDropdownValue(match.team2_player1),
-      t2p2: getDropdownValue(match.team2_player2),
-      format: match.format || 'TBD'
-    });
-  };
-
   const formatDisplayTime = (t) => t ? new Date(`2000-01-01T${t}`).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'TBD';
 
-  // 🎯 REFACTORED to take handicapData directly so we don't calculate it twice
   const getStrokeChipLayout = (handicapData, isAssigned) => {
     if (!golfers || golfers.length === 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-500 animate-pulse">Syncing...</span>;
     if (!isAssigned) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Unassigned</span>;
@@ -122,12 +150,10 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
       const allVals = [...t1Vals, ...t2Vals];
       
       const maxStrokes = allVals.length > 0 ? Math.max(...allVals) : 0;
-
       if (maxStrokes > 0) {
         return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-amber-500/20 bg-amber-500/5 text-amber-400">Individual Strokes</span>;
       }
     }
-    
     return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Scratch Match</span>;
   };
 
@@ -151,18 +177,21 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
 
       <main className="p-5 flex flex-col gap-4 max-w-md mx-auto w-full flex-1">
         {displayedMatches.map((match) => {
-          const me = resolveGolfer(player?.auth_id || player?.id);
-          const isMyMatch = me && [match.team1_player1, match.team1_player2, match.team2_player1, match.team2_player2].some(ref => {
-            const g = resolveGolfer(ref);
-            return g && g.id === me.id;
-          });
-          
+          const cleanIsMe = (ref) => {
+            if (!ref || !player) return false;
+            const target = String(ref).trim().toLowerCase();
+            return String(player.auth_id).trim().toLowerCase() === target || String(player.id).trim().toLowerCase() === target;
+          };
+
+          const isMyMatch = cleanIsMe(match.team1_player1) || cleanIsMe(match.team1_player2) || cleanIsMe(match.team2_player1) || cleanIsMe(match.team2_player2);
           const isMatchTimeReady = isMatchReadyToStart(match.round, match.tee_time);
           const isEditing = editingMatchId === match.id;
-          const canEdit = isAdmin || (isAnyCaptain && match.status === 'scheduled' && !match.is_live);
+          
+          // 🎯 READ DYNAMIC BOOLEAN COLUMNS
+          const isCurrentlyLive = match.is_live === true || match.is_live === 'true';
+          const canEdit = isUserExplicitAdmin || (isAnyCaptain && !isCurrentlyLive && match.status !== 'completed');
           const isAssigned = match.team1_player1 || match.team2_player1;
 
-          // 🎯 CALCULATE HANDICAP DATA RIGHT HERE FOR THE WHOLE CARD
           const t1p1 = resolveGolfer(match.team1_player1);
           const t1p2 = resolveGolfer(match.team1_player2);
           const t2p1 = resolveGolfer(match.team2_player1);
@@ -178,6 +207,21 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
 
           const format = match.format || '1v1';
           const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
+
+          const renderLiveStatusString = () => {
+            const currentMatchScores = allHoleScores.filter(s => s.matchup_id === match.id);
+            
+            if (!currentMatchScores || currentMatchScores.length === 0 || courseHoles.length === 0) {
+              return 'AS // TEE 1';
+            }
+
+            const evalResult = evaluateMatchStatus(format, handicapData, courseHoles, currentMatchScores);
+            
+            if (evalResult.holesPlayed === 0) return 'AS // TEE 1';
+            if (match.status === 'completed') return `${evalResult.statusStr} (Final)`;
+            
+            return `${evalResult.statusStr} // THRU ${evalResult.holesPlayed}`;
+          };
 
           return (
             <div key={match.id} className={`bg-[#121827] rounded-2xl p-4 border relative overflow-hidden flex flex-col gap-4 transition-all ${isMyMatch && !isEditing ? 'border-[#34d399]/40 shadow-lg' : 'border-white/5'}`}>
@@ -198,7 +242,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                 {!isEditing && canEdit && <button onClick={() => startEditing(match)} className="text-amber-500 hover:text-amber-400 bg-amber-500/10 px-2 py-1 rounded transition-colors">{isAssigned ? 'Edit' : 'Assign'}</button>}
                 {isEditing && (
                   <div className="flex items-center gap-2">
-                    {isAdmin && <button onClick={() => handleResetMatch(match.id)} disabled={isProcessing} className="text-red-400 bg-red-500/10 border border-red-500/20 px-2.5 py-1 rounded active:scale-95 transition-all">Reset</button>}
                     <button onClick={() => setEditingMatchId(null)} disabled={isProcessing} className="text-slate-400 bg-white/5 border border-white/10 px-2.5 py-1 rounded active:scale-95 transition-all">Cancel</button>
                     <button onClick={() => handleSaveRoster(match.id)} disabled={isProcessing} className="text-black bg-amber-500 px-3 py-1 rounded shadow-lg active:scale-95 transition-all">{isProcessing ? '...' : 'Save'}</button>
                   </div>
@@ -220,8 +263,8 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                       </select>
                     </div>
                   ) : (
-                    <>
-                      <div className="flex items-center gap-1.5 mb-0.5">
+                    <div className="flex flex-col gap-0.5 truncate">
+                      <div className="flex items-center gap-1.5">
                         <div className="text-sm font-black text-white truncate">{getGolferName(match.team1_player1)}</div>
                         {!isEditing && handicapData?.type === 'individual' && handicapData.team1?.t1p1 > 0 && (
                           <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team1.t1p1}</span>
@@ -232,12 +275,13 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                           <div className="text-xs text-slate-400 truncate">{getGolferName(match.team1_player2)}</div>
                           {!isEditing && handicapData?.type === 'individual' && handicapData.team1?.t1p2 > 0 && (
                             <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team1.t1p2}</span>
-                          )}
+                        )}
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
+                
                 <div className="text-right border-l border-white/5 pl-4">
                   <span className="text-[9px] font-black uppercase text-red-400 block mb-1">Brothelmen</span>
                   {isEditing && isBrothelmenCaptain ? (
@@ -252,8 +296,8 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                       </select>
                     </div>
                   ) : (
-                    <>
-                      <div className="flex items-center justify-end gap-1.5 mb-0.5">
+                    <div className="flex flex-col items-end gap-0.5 truncate">
+                      <div className="flex items-center justify-end gap-1.5">
                         <div className="text-sm font-black text-white truncate">{getGolferName(match.team2_player1)}</div>
                         {!isEditing && handicapData?.type === 'individual' && handicapData.team2?.t2p1 > 0 && (
                           <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team2.t2p1}</span>
@@ -267,32 +311,42 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                           )}
                         </div>
                       )}
-                    </>
+                    </div>
                   )}
                 </div>
               </div>
 
               {!isEditing && match.team1_player1 && match.team2_player1 && (
-                <MatchProbabilityBar matchId={match.id} status={match.status} team1Name={getGolferName(match.team1_player1)} team2Name={getGolferName(match.team2_player1)} />
-              )}
+  <MatchProbabilityBar 
+    matchId={match.id} 
+    status={match.status} 
+    team1Name={getGolferName(match.team1_player1)} 
+    team2Name={getGolferName(match.team2_player1)} 
+    staticMode={true} 
+  />
+)}
 
               {!isEditing && (
                 <div className="flex justify-between items-center border-t border-white/5 pt-3 mt-1">
                   <div className="flex flex-col">
                     <span className="text-[8px] font-black text-slate-500 uppercase">Match State</span>
-                    <span className="text-sm font-black text-slate-200">{match.status === 'completed' || match.status === 'live' ? `${match.team1_score} vs ${match.team2_score}` : 'AS // TEE 1'}</span>
+                    <span className="text-sm font-black text-slate-200">{renderLiveStatusString()}</span>
                   </div>
                   <button 
                     onClick={() => {
-                      if (isMyMatch && match.status === 'scheduled' && !isMatchTimeReady) {
+                      if (!isUserExplicitAdmin && isMyMatch && !isCurrentlyLive && !isMatchTimeReady) {
                         alert("Too early to launch scoring. The engine unlocks 30 minutes before your tee time.");
                         return;
                       }
                       onLaunchScoringEngine(match.id);
                     }}
-                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase transition-transform active:scale-95 ${isMyMatch ? (match.status === 'scheduled' && !isMatchTimeReady ? 'bg-slate-800 text-slate-500 border border-slate-700' : 'bg-[#34d399] text-black') : 'bg-white/5 text-slate-300'}`}
+                    className={`px-4 py-2.5 rounded-xl text-xs font-black uppercase transition-transform active:scale-95 ${
+                      isUserExplicitAdmin || isCurrentlyLive || (isMyMatch && isMatchTimeReady) 
+                        ? 'bg-[#34d399] text-black shadow-lg' 
+                        : 'bg-slate-800 text-slate-500 border border-slate-700'
+                    }`}
                   >
-                    {isMyMatch ? (match.status === 'scheduled' && !isMatchTimeReady ? 'Too Early to Start' : 'Score My Card') : (match.status === 'scheduled' ? 'Match Preview' : 'View Broadcast')}
+                    {isUserExplicitAdmin ? 'Force Launch Scorecard' : isMyMatch ? (isCurrentlyLive ? 'Score My Card' : !isMatchTimeReady ? 'Too Early to Start' : 'Start Scoring') : (isCurrentlyLive ? 'View Broadcast' : 'Match Preview')}
                   </button>
                 </div>
               )}

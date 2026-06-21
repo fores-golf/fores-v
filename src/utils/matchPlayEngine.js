@@ -31,9 +31,14 @@ export function calculatePlayingHandicaps(format, team1Players, team2Players) {
       ? (0.35 * Math.min(t2p1Base, t2p2Base)) + (0.15 * Math.max(t2p1Base, t2p2Base)) 
       : t2p1Base;
 
+    // Net the final team handicaps against each other so only the underdog team receives strokes
+    const roundedT1 = Math.round(t1Hcp);
+    const roundedT2 = Math.round(t2Hcp);
+    const lowestTeam = Math.min(roundedT1, roundedT2);
+
     return {
-      team1Strokes: Math.round(t1Hcp),
-      team2Strokes: Math.round(t2Hcp),
+      team1Strokes: roundedT1 - lowestTeam,
+      team2Strokes: roundedT2 - lowestTeam,
       type: 'team'
     };
   }
@@ -53,6 +58,21 @@ export function calculatePlayingHandicaps(format, team1Players, team2Players) {
 }
 
 /**
+ * Determines if an allocated stroke lands on a specific hole difficulty index
+ */
+export function receivesStrokeOnHole(totalStrokesReceived, holeDifficultyIndex) {
+  if (totalStrokesReceived <= 0) return false;
+  
+  let baseStrokes = Math.floor(totalStrokesReceived / 18);
+  const remainder = totalStrokesReceived % 18;
+  
+  if (remainder >= holeDifficultyIndex) {
+    return true;
+  }
+  return baseStrokes > 0;
+}
+
+/**
  * PHASE 3: Stroke allocation based on Hole Difficulty
  */
 function getNetScore(grossScore, strokesReceived, holeDifficultyIndex) {
@@ -69,7 +89,7 @@ function getNetScore(grossScore, strokesReceived, holeDifficultyIndex) {
 }
 
 /**
- * NEW: Vegas Concatenation Engine
+ * Vegas Concatenation Engine
  */
 function getVegasScore(net1, net2) {
   // Vegas requires BOTH players to finish the hole to generate a team score
@@ -191,5 +211,12 @@ export function evaluateMatchStatus(format, handicapData, allHolesData, holeScor
     isFinal = true;
   }
 
-  return { team1Wins, team2Wins, statusStr, isFinal };
+  // Around line 200 inside matchPlayEngine.js -> evaluateMatchStatus
+  return { 
+    team1Wins, 
+    team2Wins, 
+    statusStr, 
+    isFinal,
+    holesPlayed // 🎯 ADD THIS so the screen knows exactly what 'Thru' hole it is!
+  };
 }

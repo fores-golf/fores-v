@@ -64,10 +64,7 @@ const targetIcon = new L.divIcon({
 });
 
 export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }) {
-  // 🛑 KILL SWITCH: Set to true to re-enable the badge unlocking / card minting engine
-  const ENABLE_CARD_MINTING = false;
-
-  const { player, refreshIdentity } = useUser();
+  const { player } = useUser();
   const [mapType, setMapType] = useState('satellite');
   const [targetPos, setTargetPos] = useState(null);
   const [shotOrigin, setShotOrigin] = useState(null);
@@ -159,85 +156,6 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
     ? "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     : "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}";
 
-  // --- INTERNAL DATABASE INJECTION ENGINE ---
-  const handleInlineSaveScore = async (sheetData) => {
-    if (!player || !holeData) return;
-
-    try {
-      // 1. ALWAYS save the score (unaffected by kill switch)
-      const dbPayload = {
-        player_id: player.id,
-        matchup_id: Number(insights?.matchupId || 7),
-        hole_number: Number(holeData.hole_number),
-        hole_id: Number(holeData.id),
-        gross_score: Number(sheetData.score || 0),
-        putts: Number(sheetData.putts || 0),
-        accuracy: sheetData.accuracy || '',
-        penalty_strokes: Number(sheetData.penalties || 0),
-        water_balls: Number(sheetData.water || 0),
-        drinks: Number(sheetData.drinks || 0),
-        par: Number(holeData.par) 
-      };
-
-      const { error: saveError } = await supabase
-        .from('hole_scores')
-        .upsert(dbPayload, { onConflict: 'player_id, hole_number, matchup_id' });
-
-      if (saveError) throw saveError;
-
-      // 2. Only run the Card Minting Protocol if enabled
-      if (ENABLE_CARD_MINTING) {
-        const { data: scores, error: fetchError } = await supabase
-          .from('hole_scores')
-          .select('gross_score, par')
-          .eq('player_id', player.id)
-          .order('updated_at', { ascending: true });
-
-        if (fetchError) throw fetchError;
-
-        if (scores && scores.length > 0) {
-          let maxStreak = 0;
-          let currentStreak = 0;
-
-          scores.forEach((hole) => {
-            if (hole.gross_score !== null && hole.par !== null && hole.gross_score <= hole.par) {
-              currentStreak++;
-              if (currentStreak > maxStreak) maxStreak = currentStreak;
-            } else {
-              currentStreak = 0;
-            }
-          });
-
-          const badgeTiers = [
-            { id: 'b1', target: 2 }, { id: 'b2', target: 3 }, { id: 'b3', target: 4 },
-            { id: 'b4', target: 5 }, { id: 'b5', target: 6 }, { id: 'b6', target: 7 },
-            { id: 'b7', target: 8 }, { id: 'b8', target: 9 }, { id: 'b9', target: 10 }
-          ];
-
-          const currentlyUnlocked = player.unlocked_badges || [];
-          const newUnlocks = badgeTiers
-            .filter(tier => maxStreak >= tier.target && !currentlyUnlocked.includes(tier.id))
-            .map(tier => tier.id);
-
-          if (newUnlocks.length > 0) {
-            const { error: patchError } = await supabase
-              .from('players')
-              .update({ unlocked_badges: [...currentlyUnlocked, ...newUnlocks] })
-              .eq('id', player.id);
-
-            if (patchError) throw patchError;
-          }
-        }
-      }
-
-      await refreshIdentity();
-
-    } catch (error) {
-      console.error("Error saving score inline:", error.message);
-      alert("Error saving score: " + error.message);
-    }
-  };
-
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in font-sans">
       
@@ -259,13 +177,19 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
           )}
         </div>
 
+        {/* --- RYDER STATUS CARD PANEL --- */}
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2.5 shadow-lg pointer-events-auto flex flex-col font-mono">
            <span className="text-[7px] font-black text-slate-500 uppercase tracking-wider mb-1 font-sans">Ryder Status</span>
            <div className="text-xs font-black text-orange-400 flex items-center gap-1">
              <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping inline-block" />
-             {insights?.status || 'All Square'}
+             {/* 🎯 FIX: Explicitly handle fallback if status is missing or evaluating to empty string */}
+             {insights?.status && insights.status !== "" ? insights.status : 'AS'}
            </div>
-           <div className="text-[9px] font-bold text-slate-400 mt-0.5">{insights?.thru || 'Thru 1'}</div>
+           
+           {/* 🎯 FIX: Explicitly prepend the word "Thru" dynamically so it doesn't show a raw number or freeze on Thru 1 */}
+           <div className="text-[9px] font-bold text-slate-400 mt-0.5">
+             {insights?.thru && insights.thru > 0 ? `Thru ${insights.thru}` : 'Thru 1'}
+           </div>
 
            {(insights?.matchupId || insights?.matchId) && (
              <MatchProbabilityBar 
@@ -286,9 +210,10 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
 
       {/* --- FLOATING RIGHT STACK --- */}
       <div className="absolute top-24 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
+        {/* 🎯 FIXED TRIGGER: Calls the unified parent callback from MatchScreen directly */}
         <button 
-          onClick={() => onLogScoreClick && onLogScoreClick(handleInlineSaveScore)}
-          className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95"
+          onClick={onLogScoreClick}
+          className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95 cursor-pointer"
         >
           Log Score
         </button>
