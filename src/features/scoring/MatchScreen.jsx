@@ -250,7 +250,7 @@ export default function MatchScreen({ matchId, onBack }) {
     const { error } = await supabase.from('hole_scores').upsert(upsertPayload, { onConflict: 'matchup_id, hole_id' });
     if (error) return alert(error.message);
 
-    try {
+   try {
       const { data: currentMatch } = await supabase.from('matches').select('*').eq('id', matchId).single();
       const { data: allMatchScores } = await supabase.from('hole_scores').select('*').eq('matchup_id', matchId);
       const { data: liveProfiles } = await supabase.from('players').select('id, auth_id, handicap');
@@ -261,6 +261,7 @@ export default function MatchScreen({ matchId, onBack }) {
           return found ? parseInt(found.handicap, 10) || 0 : 0;
         };
 
+        const format = currentMatch.format || '1v1';
         const team1Arr = [];
         if (currentMatch.team1_player1) team1Arr.push({ id: 't1p1', courseHandicap: findHcp(currentMatch.team1_player1) });
         if (currentMatch.team1_player2) team1Arr.push({ id: 't1p2', courseHandicap: findHcp(currentMatch.team1_player2) });
@@ -269,16 +270,44 @@ export default function MatchScreen({ matchId, onBack }) {
         if (currentMatch.team2_player1) team2Arr.push({ id: 't2p1', courseHandicap: findHcp(currentMatch.team2_player1) });
         if (currentMatch.team2_player2) team2Arr.push({ id: 't2p2', courseHandicap: findHcp(currentMatch.team2_player2) });
 
-        const handicapData = calculatePlayingHandicaps(currentMatch.format, team1Arr, team2Arr);
-        const matchResult = evaluateMatchStatus(currentMatch.format, handicapData, allHoles, allMatchScores);
+        const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
 
-        // 🎯 MUTATE SPECIFIC ATTRIBUTES RECOGNIZED BY TABLE SCHEMA
+        // 🎯 FIX: Explicitly parse and normalize your exact custom row score properties
+        const netScoresPayload = allMatchScores.map(scoreRow => {
+          const holeMeta = allHoles.find(h => h.id === scoreRow.hole_id || h.hole_number === scoreRow.hole_number);
+          const hcpIdx = holeMeta ? holeMeta.hcp_index : 18;
+
+          const getNet = (gross, strokes) => {
+            if (gross == null) return null;
+            let applied = Math.floor((strokes || 0) / 18);
+            if (((strokes || 0) % 18) >= hcpIdx) applied += 1;
+            return gross - applied;
+          };
+
+          return {
+            ...scoreRow,
+            t1p1: getNet(scoreRow.score_slanted_a, handicapData.type === 'team' ? handicapData.team1Strokes : handicapData.team1?.t1p1),
+            t1p2: getNet(scoreRow.score_slanted_b, handicapData.type === 'team' ? handicapData.team1Strokes : handicapData.team1?.t1p2),
+            t2p1: getNet(scoreRow.score_brothelmen_a, handicapData.type === 'team' ? handicapData.team2Strokes : handicapData.team2?.t2p1),
+            t2p2: getNet(scoreRow.score_brothelmen_b, handicapData.type === 'team' ? handicapData.team2Strokes : handicapData.team2?.t2p2),
+          };
+        });
+
+        const matchResult = evaluateMatchStatus(format, handicapData, allHoles, netScoresPayload);
+        const isMatchOver = allMatchScores.length >= 18 || matchResult.statusStr.includes('&') || matchResult.statusStr.includes('Won');
+
+        let finalStatusText = matchResult.statusStr;
+        if (isMatchOver && !finalStatusText.includes('Clams') && !finalStatusText.includes('Brothelmen')) {
+          finalStatusText = matchResult.team1Wins > matchResult.team2Wins ? 'Slanted Clams Won' : 'Clam Brothelmen Won';
+        }
+
         await supabase
           .from('matches')
           .update({
-            is_live: true,                              // 🎯 Flips the real schema flag to live
-            team1_score: String(matchResult.team1Wins), // Persists raw win indices as strings
-            team2_score: String(matchResult.team2Wins)
+            is_live: !isMatchOver,
+            status: isMatchOver ? 'completed' : 'live',
+            team1_score: finalStatusText, 
+            team2_score: finalStatusText
           })
           .eq('id', matchId);
       }

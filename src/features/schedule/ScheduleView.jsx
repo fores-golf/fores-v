@@ -27,7 +27,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   const fetchLiveScoresAndHoles = async () => {
     try {
       const { data: scores } = await supabase.from('hole_scores').select('*');
-      const { data: holes } = await supabase.from('holes').select('*').eq('course_id', 1);
+      const { data: holes } = await supabase.from('holes').select('*'); // Load all course holes
       if (scores) setAllHoleScores(scores);
       if (holes) setCourseHoles(holes);
     } catch (err) {
@@ -102,11 +102,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     return golfer ? golfer.name : 'TBD';
   };
 
-  const getDropdownValue = (refId) => {
-    const golfer = resolveGolfer(refId);
-    return golfer ? (golfer.auth_id || golfer.id) : '';
-  };
-
   const handleSaveRoster = async (matchId) => {
     setIsProcessing(true);
     try {
@@ -133,6 +128,17 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const startEditing = (match) => {
+    setEditForm({
+      t1p1: match.team1_player1 || '',
+      t1p2: match.team1_player2 || '',
+      t2p1: match.team2_player1 || '',
+      t2p2: match.team2_player2 || '',
+      format: match.format || '1v1'
+    });
+    setEditingMatchId(match.id);
   };
 
   const formatDisplayTime = (t) => t ? new Date(`2000-01-01T${t}`).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'TBD';
@@ -163,7 +169,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans flex flex-col pb-safe fixed inset-0 z-40 overflow-y-auto style-scrolling-touch">
       <div className="px-5 py-4 flex justify-between items-center bg-[#0f172a]/90 backdrop-blur-xl border-b border-white/5 sticky top-0 z-20">
         <button onClick={onBack} className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 active:scale-95 transition-transform">◀ Hub</button>
-        <h1 className="font-black text-lg tracking-tight uppercase italic">Tournament Log</h1>
+        <h1 className="font-black text-lg tracking-tight uppercase italic " >Tournament Log</h1>
         <div className="w-12"></div>
       </div>
 
@@ -187,7 +193,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
           const isMatchTimeReady = isMatchReadyToStart(match.round, match.tee_time);
           const isEditing = editingMatchId === match.id;
           
-          // 🎯 READ DYNAMIC BOOLEAN COLUMNS
           const isCurrentlyLive = match.is_live === true || match.is_live === 'true';
           const canEdit = isUserExplicitAdmin || (isAnyCaptain && !isCurrentlyLive && match.status !== 'completed');
           const isAssigned = match.team1_player1 || match.team2_player1;
@@ -208,17 +213,47 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
           const format = match.format || '1v1';
           const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
 
+          // 🎯 FIX: Force live layout rendering directly from scores array to overwrite old '5&0' text rows
           const renderLiveStatusString = () => {
             const currentMatchScores = allHoleScores.filter(s => s.matchup_id === match.id);
+            const matchHoles = courseHoles.filter(h => h.course_id === (match.course_id || 1));
             
-            if (!currentMatchScores || currentMatchScores.length === 0 || courseHoles.length === 0) {
+            if (!currentMatchScores || currentMatchScores.length === 0 || matchHoles.length === 0) {
               return 'AS // TEE 1';
             }
 
-            const evalResult = evaluateMatchStatus(format, handicapData, courseHoles, currentMatchScores);
+            // Map custom schema property fields to standard evaluation keys
+            const netScoresPayload = currentMatchScores.map(row => {
+              const hMeta = matchHoles.find(h => h.id === row.hole_id || h.hole_number === row.hole_number);
+              const hIdx = hMeta ? hMeta.hcp_index : 18;
+
+              const getNet = (gross, strokes) => {
+                if (gross == null) return null;
+                let applied = Math.floor((strokes || 0) / 18);
+                if (((strokes || 0) % 18) >= hIdx) applied += 1;
+                return gross - applied;
+              };
+
+              return {
+                ...row,
+                t1p1: getNet(row.score_slanted_a, handicapData.type === 'team' ? handicapData.team1Strokes : handicapData.team1?.t1p1),
+                t1p2: getNet(row.score_slanted_b, handicapData.type === 'team' ? handicapData.team1Strokes : handicapData.team1?.t1p2),
+                t2p1: getNet(row.score_brothelmen_a, handicapData.type === 'team' ? handicapData.team2Strokes : handicapData.team2?.t2p1),
+                t2p2: getNet(row.score_brothelmen_b, handicapData.type === 'team' ? handicapData.team2Strokes : handicapData.team2?.t2p2),
+              };
+            });
+
+            const evalResult = evaluateMatchStatus(format, handicapData, matchHoles, netScoresPayload);
+            const isFinished = match.status === 'completed' || currentMatchScores.length >= 18 || evalResult.statusStr.includes('&');
             
             if (evalResult.holesPlayed === 0) return 'AS // TEE 1';
-            if (match.status === 'completed') return `${evalResult.statusStr} (Final)`;
+            if (isFinished) {
+              // Custom text formatting fallback boundary rules
+              if (!evalResult.statusStr.includes('Clams') && !evalResult.statusStr.includes('Brothelmen') && evalResult.statusStr !== 'AS') {
+                return evalResult.team1Wins > evalResult.team2Wins ? 'Slanted Clams Won (Final)' : 'Clam Brothelmen Won (Final)';
+              }
+              return `${evalResult.statusStr} (Final)`;
+            }
             
             return `${evalResult.statusStr} // THRU ${evalResult.holesPlayed}`;
           };
@@ -275,7 +310,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                           <div className="text-xs text-slate-400 truncate">{getGolferName(match.team1_player2)}</div>
                           {!isEditing && handicapData?.type === 'individual' && handicapData.team1?.t1p2 > 0 && (
                             <span className="bg-white/10 text-slate-300 text-[8px] px-1.5 py-0.5 rounded font-bold">+{handicapData.team1.t1p2}</span>
-                        )}
+                          )}
                         </div>
                       )}
                     </div>
@@ -317,14 +352,8 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
               </div>
 
               {!isEditing && match.team1_player1 && match.team2_player1 && (
-  <MatchProbabilityBar 
-    matchId={match.id} 
-    status={match.status} 
-    team1Name={getGolferName(match.team1_player1)} 
-    team2Name={getGolferName(match.team2_player1)} 
-    staticMode={true} 
-  />
-)}
+                <MatchProbabilityBar matchId={match.id} status={match.status} team1Name={getGolferName(match.team1_player1)} team2Name={getGolferName(match.team2_player1)} staticMode={true} />
+              )}
 
               {!isEditing && (
                 <div className="flex justify-between items-center border-t border-white/5 pt-3 mt-1">
