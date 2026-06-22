@@ -38,7 +38,6 @@ export default function DashboardView({
     return sessionStorage.getItem('fores_v_splash_seen') !== 'true';
   });
 
-  // Master telemetry arrays to compute match standing string states live from table memory
   const [allHoleScores, setAllHoleScores] = useState([]);
   const [courseHoles, setCourseHoles] = useState([]);
 
@@ -219,7 +218,6 @@ export default function DashboardView({
               {safeMatches.map(match => {
                 if (!match) return null;
 
-                // Lookup profile objects live from identity caches
                 const t1p1 = golfers.find(g => String(g.id) === String(match.team1_player1) || String(g.auth_id) === String(match.team1_player1));
                 const t1p2 = golfers.find(g => String(g.id) === String(match.team1_player2) || String(g.auth_id) === String(match.team1_player2));
                 const t2p1 = golfers.find(g => String(g.id) === String(match.team2_player1) || String(g.auth_id) === String(match.team2_player1));
@@ -235,13 +233,37 @@ export default function DashboardView({
 
                 const format = match.format || '1v1';
                 const handicapData = calculatePlayingHandicaps(format, team1Arr, team2Arr);
-                const currentMatchScores = allHoleScores.filter(s => s.matchup_id === match.id);
-
-                // Run score calculation live on the layout card index
-                const matchResult = evaluateMatchStatus(format, handicapData, courseHoles, currentMatchScores);
                 
-                // 🎯 FIXED FLAG TARGET CONFIGURATION: Directly tracks the is_live database attribute boolean
+                const currentMatchScores = allHoleScores.filter(s => 
+                  s.matchup_id === match.id &&
+                  (s.score_slanted_a !== null || s.score_slanted_b !== null || s.score_brothelmen_a !== null || s.score_brothelmen_b !== null)
+                );
+
+                const netScoresPayload = currentMatchScores.map(row => {
+                  const hMeta = courseHoles.find(h => h.id === row.hole_id || h.hole_number === row.hole_number);
+                  const hIdx = hMeta ? hMeta.hcp_index : 18;
+
+                  const getNet = (gross, strokes) => {
+                    if (gross == null) return null;
+                    let applied = Math.floor((strokes || 0) / 18);
+                    if (((strokes || 0) % 18) >= hIdx) applied += 1;
+                    return gross - applied;
+                  };
+
+                  return {
+                    ...row,
+                    t1p1: getNet(row.score_slanted_a, handicapData.type === 'team' ? handicapData.team1Strokes : handicapData.team1?.t1p1),
+                    t1p2: getNet(row.score_slanted_b, handicapData.type === 'team' ? handicapData.team1Strokes : handicapData.team1?.t1p2),
+                    t2p1: getNet(row.score_brothelmen_a, handicapData.type === 'team' ? handicapData.team2Strokes : handicapData.team2?.t2p1),
+                    t2p2: getNet(row.score_brothelmen_b, handicapData.type === 'team' ? handicapData.team2Strokes : handicapData.team2?.t2p2),
+                  };
+                });
+
+                const matchResult = evaluateMatchStatus(format, handicapData, courseHoles, netScoresPayload);
                 const isCurrentlyLive = match.is_live === true || match.is_live === 'true';
+                
+                // 🎯 FIX: Check if the match is completely finished to strip the "THRU X" string
+                const isFinished = match.status === 'completed' || matchResult.isClosedOut || matchResult.holesPlayed >= 18;
 
                 return (
                   <div key={match.id} className={`bg-gradient-to-br from-[#121827] to-[#0d121f] border rounded-3xl p-4 flex flex-col gap-4 shadow-xl relative overflow-hidden transition-all ${isCurrentlyLive ? 'border-orange-500/30' : 'border-white/5'}`}>
@@ -258,7 +280,6 @@ export default function DashboardView({
                       )}
                     </div>
 
-                    {/* True 2v2 Partner Quad Roster Layout Box */}
                     <div className="grid grid-cols-2 gap-4 items-center bg-black/30 p-3 rounded-2xl border border-white/5 relative">
                       <div className="flex flex-col text-left truncate">
                         <span className="text-[9px] font-black uppercase text-blue-400 tracking-wider">Slanted Clams</span>
@@ -276,9 +297,14 @@ export default function DashboardView({
                     <div className="flex justify-between items-center border-t border-white/5 pt-3 mt-1">
                       <div className="flex flex-col">
                         <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider">Match Standing</span>
-                        {/* 🎯 RENDERS SCORE DATA DIRECT FROM MULTI-PLAYER ROW ARRAYS IN MEMORY */}
+                        
+                        {/* 🎯 FIX: Intelligently strip the THRU tag if the match is officially done */}
                         <span className="text-sm font-black text-slate-200">
-                          {matchResult.holesPlayed > 0 ? `${matchResult.statusStr} // THRU ${matchResult.holesPlayed}` : 'AS // TEE 1'}
+                          {isFinished 
+                            ? matchResult.statusStr 
+                            : matchResult.holesPlayed > 0 
+                              ? `${matchResult.statusStr} // THRU ${matchResult.holesPlayed}` 
+                              : 'AS // TEE 1'}
                         </span>
                       </div>
                       <button 

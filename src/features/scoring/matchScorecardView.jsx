@@ -8,13 +8,11 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
   const [editingCell, setEditingCell] = useState(null); 
   const [editValue, setEditValue] = useState('');
 
-  // Hardcoded Admin ID check matching your override logic
   const HARDCODED_ADMIN_ID = '2889dad2-6a62-41e5-85be-8f8f5f88c893';
   const isUserExplicitAdmin = isAdmin || 
     String(player?.auth_id).trim().toLowerCase() === HARDCODED_ADMIN_ID || 
     String(player?.id).trim().toLowerCase() === HARDCODED_ADMIN_ID;
 
-  // Sort holes 1 to 18
   const sortedHoles = [...allHolesData].sort((a, b) => a.hole_number - b.hole_number);
 
   useEffect(() => {
@@ -28,29 +26,15 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
         const ids = [targetT1P1, targetT1P2, targetT2P1, targetT2P2].filter(Boolean);
         if (ids.length === 0) return;
 
-        // 🎯 FIX: Select BOTH 'id' and 'auth_id' to prevent foreign key identifier collisions
-        const { data } = await supabase.from('players').select('id, auth_id, name').in('id', ids);
+        const { data } = await supabase.from('players').select('id, auth_id, name').in('auth_id', ids);
         
-        // Backup try: check if they are filtered by auth_id in the table instead
-        let combinedData = data || [];
-        if (combinedData.length < ids.length) {
-          const { data: fallbackData } = await supabase.from('players').select('id, auth_id, name').in('auth_id', ids);
-          if (fallbackData) {
-            combinedData = [...combinedData, ...fallbackData];
-          }
-        }
-
-        if (combinedData.length > 0) {
+        if (data && data.length > 0) {
           const nameMap = {};
-          
-          // 🎯 FIX: Double-index the map dictionary with both id and auth_id keys
-          // This makes the text renderer 100% immune to casing or profile identifier mixups
-          combinedData.forEach(p => { 
-            if (p.id) nameMap[String(p.id).toLowerCase()] = p.name;
-            if (p.auth_id) nameMap[String(p.auth_id).toLowerCase()] = p.name;
+          data.forEach(p => { 
+            if (p.auth_id) nameMap[String(p.auth_id).trim().toLowerCase()] = p.name;
           });
           
-          const cleanKey = (val) => val ? String(val).toLowerCase() : '';
+          const cleanKey = (val) => val ? String(val).trim().toLowerCase() : '';
 
           setPlayerNames({
             t1p1: nameMap[cleanKey(targetT1P1)] || 'TBD',
@@ -108,14 +92,9 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
         [dbColumn]: finalValue
       };
 
-      const { error } = await supabase
-        .from('hole_scores')
-        .upsert(upsertPayload, { onConflict: 'matchup_id, hole_id' });
-
-      if (error) throw error;
+      await supabase.from('hole_scores').upsert(upsertPayload, { onConflict: 'matchup_id, hole_id' });
     } catch (err) {
-      console.error("Admin bypass matrix mutation failed:", err.message);
-      alert("Admin override transmission failed: " + err.message);
+      alert("Admin override failed: " + err.message);
     }
   };
 
@@ -125,9 +104,17 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
     setEditValue(currentVal !== null ? String(currentVal) : '');
   };
 
+  const getTeamLabel = (p1, p2) => {
+    if (!p1 || p1 === 'TBD') return 'TBD';
+    if (!p2) return p1;
+    return `${p1.split(' ')[0]} & ${p2.split(' ')[0]}`;
+  };
+
+  const team1ComboName = getTeamLabel(playerNames.t1p1, playerNames.t1p2);
+  const team2ComboName = getTeamLabel(playerNames.t2p1, playerNames.t2p2);
+
   return (
     <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-md z-[10000] p-4 flex flex-col font-sans text-white overflow-y-auto">
-      {/* Header */}
       <div className="flex justify-between items-center mb-6 max-w-4xl mx-auto w-full shrink-0 border-b border-white/10 pb-4">
         <div>
           <div className="flex items-center gap-2">
@@ -141,7 +128,6 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
         <button onClick={onClose} className="bg-white/5 border border-white/10 px-4 py-2 rounded-xl font-black text-xs uppercase tracking-wider hover:bg-white/10 active:scale-95 transition-all">Close</button>
       </div>
 
-      {/* Grid Container */}
       <div className="max-w-4xl mx-auto w-full overflow-x-auto bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-4 style-scrolling-touch">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -157,7 +143,6 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
           </thead>
           
           <tbody className="divide-y divide-slate-800/50 text-xs">
-            {/* PAR ROW */}
             <tr className="bg-black/20 font-bold text-slate-300">
               <td className="py-2.5 px-2 font-black uppercase text-[10px] tracking-wider text-emerald-400">Course Par</td>
               {sortedHoles.map(h => (
@@ -165,12 +150,11 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
               ))}
             </tr>
 
-            {/* SCRAMBLE SECTION */}
             {insights.strokesType === 'team' ? (
               <>
                 <tr className="hover:bg-white/[0.02]">
                   <td className="py-3 px-2 font-black text-blue-400 truncate">
-                    {insights.team1Name} <span className="text-[9px] font-bold text-slate-500">(+{insights.team1Strokes})</span>
+                    {team1ComboName} <span className="text-[9px] font-bold text-slate-500">(+{insights.team1Strokes})</span>
                   </td>
                   {sortedHoles.map(h => {
                     const stars = getAsterisks(insights.team1Strokes, h.hcp_index);
@@ -193,7 +177,7 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
                 </tr>
                 <tr className="hover:bg-white/[0.02]">
                   <td className="py-3 px-2 font-black text-red-400 truncate">
-                    {insights.team2Name} <span className="text-[9px] font-bold text-slate-500">(+{insights.team2Strokes})</span>
+                    {team2ComboName} <span className="text-[9px] font-bold text-slate-500">(+{insights.team2Strokes})</span>
                   </td>
                   {sortedHoles.map(h => {
                     const stars = getAsterisks(insights.team2Strokes, h.hcp_index);
@@ -217,7 +201,6 @@ export default function MatchScorecardView({ insights, allHolesData, holeScores 
               </>
             ) : (
               <>
-                {/* INDIVIDUAL FORMATS SECTION (Vegas, Shamble, 1v1) */}
                 {['t1p1', 't1p2', 't2p1', 't2p2'].map((slotKey) => {
                   const targetT1P2 = insights?.t1p2 || insights?.team1_player2;
                   const targetT2P2 = insights?.t2p2 || insights?.team2_player2;

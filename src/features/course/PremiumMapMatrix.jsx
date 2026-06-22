@@ -7,7 +7,6 @@ import { useUser } from '../../context/UserContext';
 import { useGeolocation } from '../../shared/hooks/useGeolocation';
 import { useWeather } from '../../shared/hooks/useWeather';
 import { calculateDistanceYards } from '../../shared/utils/geoMath';
-import { MatchProbabilityBar } from '../probability/probability_engine';
 
 // --- VIRTUAL CADDIE PHYSICS ENGINE ---
 function getCaddieAdvice(rawYardage, courseElevFt, homeElevFt, garage) {
@@ -63,7 +62,7 @@ const targetIcon = new L.divIcon({
   iconAnchor: [16, 16],
 });
 
-export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }) {
+export default function PremiumMapMatrix({ holeData, insights }) {
   const { player } = useUser();
   const [mapType, setMapType] = useState('satellite');
   const [targetPos, setTargetPos] = useState(null);
@@ -145,7 +144,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
 
   let windCone = null;
   if (weather && targetPos && weather.windSpeed > 3) {
-    const pushBearing = (weather.windDeg + 180) % 360;
+    const pushBearing = (weather.windDeg) % 360;
     const visualLength = weather.windSpeed * 4; 
     const leftPoint = getDestinationPoint(targetPos[0], targetPos[1], visualLength, pushBearing - 20);
     const rightPoint = getDestinationPoint(targetPos[0], targetPos[1], visualLength, pushBearing + 20);
@@ -159,8 +158,8 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
   return (
     <div className="relative w-full h-full bg-slate-950 overflow-hidden flex flex-col animate-fade-in font-sans">
       
-      {/* --- FLOATING LEFT STACK --- */}
-      <div className="absolute top-24 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
+      {/* --- FLOATING LEFT STACK (Weather Only) --- */}
+      <div className="absolute top-4 left-4 z-[400] pointer-events-none flex flex-col gap-2 max-w-[140px]">
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2 px-3 flex items-center justify-between shadow-lg pointer-events-auto">
           {weather ? (
             <div className="flex items-center gap-2 font-mono text-[10px] font-black w-full justify-between">
@@ -176,48 +175,10 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
             <span className="text-[8px] font-black text-slate-600 uppercase tracking-widest animate-pulse">Sensors...</span>
           )}
         </div>
-
-        {/* --- RYDER STATUS CARD PANEL --- */}
-        <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800/60 rounded-xl p-2.5 shadow-lg pointer-events-auto flex flex-col font-mono">
-           <span className="text-[7px] font-black text-slate-500 uppercase tracking-wider mb-1 font-sans">Ryder Status</span>
-           <div className="text-xs font-black text-orange-400 flex items-center gap-1">
-             <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping inline-block" />
-             {/* 🎯 FIX: Explicitly handle fallback if status is missing or evaluating to empty string */}
-             {insights?.status && insights.status !== "" ? insights.status : 'AS'}
-           </div>
-           
-           {/* 🎯 FIX: Explicitly prepend the word "Thru" dynamically so it doesn't show a raw number or freeze on Thru 1 */}
-           <div className="text-[9px] font-bold text-slate-400 mt-0.5">
-             {insights?.thru && insights.thru > 0 ? `Thru ${insights.thru}` : 'Thru 1'}
-           </div>
-
-           {(insights?.matchupId || insights?.matchId) && (
-             <MatchProbabilityBar 
-               matchId={insights?.matchupId || insights?.matchId}
-               status="live" 
-               variant="micro" 
-               team1Name={insights?.team1Name || 'Team 1'}
-               team2Name={insights?.team2Name || 'Team 2'}
-             />
-           )}
-
-           <div className="text-[10px] font-black text-emerald-400 mt-1.5 border-t border-slate-800 pt-1.5 flex justify-between items-center">
-             <span className="font-sans text-[7px] text-slate-600 uppercase font-black">Ledger</span>
-             <span>{insights?.wagerStatus || 'LIVE'}</span>
-           </div>
-        </div>
       </div>
 
-      {/* --- FLOATING RIGHT STACK --- */}
-      <div className="absolute top-24 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
-        {/* 🎯 FIXED TRIGGER: Calls the unified parent callback from MatchScreen directly */}
-        <button 
-          onClick={onLogScoreClick}
-          className="pointer-events-auto bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest text-[9px] h-9 px-4 rounded-xl shadow-lg border border-emerald-500 transition-all active:scale-95 cursor-pointer"
-        >
-          Log Score
-        </button>
-
+      {/* --- FLOATING RIGHT STACK (Map Controls) --- */}
+      <div className="absolute top-4 right-4 z-[400] pointer-events-none flex flex-col gap-2 items-end">
         <div className="pointer-events-auto bg-slate-900/80 backdrop-blur-sm border border-slate-800/80 rounded-xl flex overflow-hidden shadow-lg p-0.5">
           <button onClick={() => setMapType('satellite')} className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg ${mapType === 'satellite' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>Sat</button>
           <button onClick={() => setMapType('topo')} className={`px-2.5 py-1 text-[9px] font-black uppercase tracking-widest transition-all rounded-lg ${mapType === 'topo' ? 'bg-slate-800 text-white' : 'text-slate-500'}`}>Topo</button>
@@ -237,7 +198,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       </div>
 
       {/* --- VIRTUAL CADDIE HUD INTERACTIVE OVERLAY --- */}
-      <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-[400] flex flex-col items-center gap-2 w-full max-w-[290px] pointer-events-none">
+      <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-[400] flex flex-col items-center gap-2 w-full max-w-[290px] pointer-events-none">
         {showProTips && holeData?.hole_tips && (
           <div className="bg-indigo-950/95 backdrop-blur-xl border border-indigo-500/40 p-3 rounded-2xl shadow-2xl text-left animate-slide-up max-w-[280px] pointer-events-auto">
             <span className="text-[7px] font-black uppercase text-indigo-400 tracking-[0.2em] block mb-1">
@@ -322,7 +283,7 @@ export default function PremiumMapMatrix({ holeData, insights, onLogScoreClick }
       </div>
 
       {/* --- HUD FOOTER TRAIL --- */}
-      <div className="absolute bottom-8 left-4 right-4 z-[400] pointer-events-none">
+      <div className="absolute bottom-4 left-4 right-4 z-[400] pointer-events-none">
         <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800/80 rounded-2xl p-4 px-6 shadow-[0_-15px_35px_rgba(0,0,0,0.5)] pointer-events-auto grid grid-cols-3 items-center">
           <div className="flex flex-col text-left">
             <span className="text-[8px] font-black uppercase tracking-[0.2em] text-slate-500 mb-0.5">Front</span>

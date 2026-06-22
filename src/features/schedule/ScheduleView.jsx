@@ -128,9 +128,13 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     );
   }
 
-  // Admin and captain privileges are temporarily disabled to treat everyone as a general user
-  const isUserExplicitAdmin = false;
-  const isAnyCaptain = false;
+  // --- ADMIN IDENTITY OVERRIDE ---
+  const myId = player?.id?.trim().toLowerCase();
+  const myAuthId = player?.auth_id?.trim().toLowerCase();
+  const HARDCODED_ADMIN_ID = '2889dad2-6a62-41e5-85be-8f8f5f88c893';
+  const isUserExplicitAdmin = myAuthId === HARDCODED_ADMIN_ID || myId === HARDCODED_ADMIN_ID;
+
+  const isAnyCaptain = false; // Add logic if needed later
 
   const team1Options = golfers.filter(g => g.team === 'Slanted Clams');
   const team2Options = golfers.filter(g => g.team === 'Clam Brothelmen');
@@ -153,8 +157,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
     setIsProcessing(true);
     try {
       const updates = {};
-      // Roster edits will utilize standard permissions if active
-      if (isUserExplicitAdmin) {
+      if (isUserExplicitAdmin || isAnyCaptain) {
         updates.team1_player1 = editForm.t1p1 || null;
         updates.team1_player2 = editForm.t1p2 || null;
         updates.team2_player1 = editForm.t2p1 || null;
@@ -186,26 +189,6 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
   };
 
   const formatDisplayTime = (t) => t ? new Date(`2000-01-01T${t}`).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'TBD';
-
-  const getStrokeChipLayout = (handicapData, isAssigned) => {
-    if (!golfers || golfers.length === 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-slate-800 bg-slate-900 text-slate-500 animate-pulse">Syncing...</span>;
-    if (!isAssigned) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Unassigned</span>;
-
-    if (handicapData.type === 'team') {
-      if (handicapData.team1Strokes > 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-blue-500/20 bg-blue-500/5 text-blue-400">Clams +{handicapData.team1Strokes} Strokes</span>;
-      if (handicapData.team2Strokes > 0) return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-red-500/20 bg-red-500/5 text-red-400">Brothelmen +{handicapData.team2Strokes} Strokes</span>;
-    } else {
-      const t1Vals = handicapData.team1 ? Object.values(handicapData.team1) : [];
-      const t2Vals = handicapData.team2 ? Object.values(handicapData.team2) : [];
-      const allVals = [...t1Vals, ...t2Vals];
-      
-      const maxStrokes = allVals.length > 0 ? Math.max(...allVals) : 0;
-      if (maxStrokes > 0) {
-        return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-amber-500/20 bg-amber-500/5 text-amber-400">Individual Strokes</span>;
-      }
-    }
-    return <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded border border-white/5 bg-white/5 text-slate-500">Scratch Match</span>;
-  };
 
   const displayedMatches = allMatches.filter(m => m.round === activeRound).sort((a, b) => (a.tee_time || '').localeCompare(b.tee_time || ''));
   
@@ -358,7 +341,7 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
             });
 
             const evalResult = evaluateMatchStatus(format, handicapData, matchHoles, netScoresPayload);
-            const isFinished = match.status === 'completed' || currentMatchScores.length >= 18 || evalResult.statusStr.includes('&');
+            const isFinished = match.status === 'completed' || evalResult.holesPlayed >= 18 || evalResult.statusStr.includes('&');
             
             if (evalResult.holesPlayed === 0) return 'AS // TEE 1';
             if (isFinished) {
@@ -377,17 +360,23 @@ export default function ScheduleView({ onBack, onLaunchScoringEngine }) {
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {isEditing ? (
                     <select value={editForm.format} onChange={(e) => setEditForm({...editForm, format: e.target.value})} className="bg-black/50 border border-white/10 rounded px-2 py-1 text-[#34d399]">
-                      <option value="TBD">TBD</option><option value="1v1">1v1</option><option value="Scramble">Scramble</option><option value="Shamble">Shamble</option><option value="Vegas">Vegas</option>
+                      <option value="TBD">TBD</option>
+                      <option value="1v1">1v1</option>
+                      <option value="Scramble">Scramble</option>
+                      <option value="Greensomes">Greensomes</option>
+                      <option value="Best Ball">Best Ball</option>
+                      <option value="Vegas">Vegas</option>
                     </select>
                   ) : <span className="text-[#34d399] font-black">{match.format || 'TBD'}</span>}
                   <span className="text-slate-700 font-black">•</span>
                   <span className="text-slate-300 font-mono font-bold">{formatDisplayTime(match.tee_time)}</span>
                   <span className="text-slate-700 font-black">•</span>
                   <span className="text-amber-500/80 mr-1">{ROUND_METADATA[activeRound]?.course}</span>
-                  {!isEditing && getStrokeChipLayout(handicapData, isAssigned)}
                 </div>
                 
+                {/* ADMIN OVERRIDE BUTTON TO ASSIGN/EDIT ROSTERS */}
                 {!isEditing && canEdit && <button onClick={() => startEditing(match)} className="text-amber-500 hover:text-amber-400 bg-amber-500/10 px-2 py-1 rounded transition-colors">{isAssigned ? 'Edit' : 'Assign'}</button>}
+                
                 {isEditing && (
                   <div className="flex items-center gap-2">
                     <button onClick={() => setEditingMatchId(null)} disabled={isProcessing} className="text-slate-400 bg-white/5 border border-white/10 px-2.5 py-1 rounded active:scale-95 transition-all">Cancel</button>

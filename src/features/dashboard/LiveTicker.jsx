@@ -2,6 +2,51 @@ import React from 'react';
 // IMPORTANT: Adjust these import paths to match exactly where these files live in your project
 import { useLeaderboardData } from '../leaderboard/LeaderboardView'; 
 import { MatchProbabilityBar } from '../probability/probability_engine';
+import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
+
+const TickerMatchItem = ({ match }) => {
+  const t1Names = match.team1_player2 ? `${match.team1_player1} & ${match.team1_player2}` : match.team1_player1;
+  const t2Names = match.team2_player2 ? `${match.team2_player1} & ${match.team2_player2}` : match.team2_player1;
+
+  // 🎯 FIX: Pull the exact live status string evaluated by the leaderboard engine
+  // This ensures closed-out matches immediately read "CLAMS 4 & 3" or "BROTHELMEN 2 UP" instead of raw scores
+  const matchStatusBadge = <span className="text-slate-200">{match.statusStr || 'AS'}</span>;
+  const isCompleted = match.status === 'completed' || match.live_holesPlayed >= 18;
+
+  return (
+    <div className="flex items-center gap-3 mx-8 shrink-0">
+      <div className="flex items-center gap-1.5">
+        {!isCompleted && <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping absolute opacity-75"></span>}
+        <span className={`w-1.5 h-1.5 rounded-full relative ${isCompleted ? 'bg-emerald-500' : 'bg-orange-500'}`}></span>
+        <span className={`text-[9px] font-black uppercase tracking-widest ${isCompleted ? 'text-emerald-400' : 'text-orange-400'}`}>
+          {isCompleted ? 'Final' : 'Live'}
+        </span>
+      </div>
+      
+      <div className="flex items-center gap-2 text-slate-300 font-bold text-[10px] uppercase tracking-wider">
+        <span className="text-blue-400/80">{t1Names}</span>
+        
+        {/* Clean, proper Match Play Badge */}
+        <div className="flex items-center justify-center min-w-[70px] bg-black/40 px-2 py-0.5 rounded border border-white/10 font-black tabular-nums shadow-inner whitespace-nowrap text-xs uppercase tracking-tight">
+          {matchStatusBadge}
+        </div>
+
+        <span className="text-red-400/80">{t2Names}</span>
+      </div>
+      
+      <div className="opacity-90 pointer-events-none flex items-center shrink-0 min-w-max">
+        <MatchProbabilityBar 
+          matchId={match.id} 
+          status={isCompleted ? 'completed' : 'live'} 
+          team1Name={match.team1_player1} 
+          team2Name={match.team2_player1} 
+          staticMode={false} 
+          variant="ticker"
+        />
+      </div>
+    </div>
+  );
+};
 
 export default function LiveTicker() {
   const { standings, matchHistory, loading } = useLeaderboardData();
@@ -16,7 +61,6 @@ export default function LiveTicker() {
     );
   }
 
-  // Filter for matches currently out on the course
   const liveMatches = matchHistory.filter(m => 
     m.status === 'live' || m.is_live === true || m.is_live === 'true'
   );
@@ -47,7 +91,6 @@ export default function LiveTicker() {
         {[...Array(2)].map((_, i) => (
           <div key={i} className="flex items-center">
             
-            {/* Overall Tournament Score Jumbotron */}
             <div className="flex items-center gap-3 mx-8 shrink-0">
               <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">🏆 Overall</span>
               <div className="flex items-center gap-2 bg-black/40 px-3 py-1 rounded-full border border-white/5">
@@ -57,51 +100,9 @@ export default function LiveTicker() {
               </div>
             </div>
 
-            {/* Live Matchup Feeds */}
-            {liveMatches.length > 0 ? liveMatches.map(match => {
-              // Dynamically build the team names depending on if it's 1v1 or 2v2
-              const t1Names = match.team1_player2 ? `${match.team1_player1} & ${match.team1_player2}` : match.team1_player1;
-              const t2Names = match.team2_player2 ? `${match.team2_player1} & ${match.team2_player2}` : match.team2_player1;
-
-              return (
-                <div key={match.id} className="flex items-center gap-3 mx-8 shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping absolute opacity-75"></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-orange-500 relative"></span>
-                    <span className="text-[9px] font-black uppercase tracking-widest text-orange-400">Live</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2 text-slate-300 font-bold text-[10px] uppercase tracking-wider">
-                    <span>{t1Names}</span>
-                    
-                    {/* Inline Numeric Score Badge */}
-                    <div className="flex items-center gap-1.5 bg-black/40 px-2 py-0.5 rounded border border-white/10 text-white font-black tabular-nums shadow-inner">
-                      <span className={Number(match.team1_score) > Number(match.team2_score) ? "text-blue-400" : ""}>
-                        {match.team1_score || 0}
-                      </span>
-                      <span className="text-slate-600">-</span>
-                      <span className={Number(match.team2_score) > Number(match.team1_score) ? "text-red-400" : ""}>
-                        {match.team2_score || 0}
-                      </span>
-                    </div>
-
-                    <span>{t2Names}</span>
-                  </div>
-                  
-                  {/* FIX: shrink-0 and min-w-max prevents flexbox from squishing the bar to 0 pixels */}
-                  <div className="opacity-90 pointer-events-none flex items-center shrink-0 min-w-max">
-                    <MatchProbabilityBar 
-                      matchId={match.id} 
-                      status={match.status} 
-                      team1Name={match.team1_player1} 
-                      team2Name={match.team2_player1} 
-                      staticMode={true} 
-                      variant="ticker"
-                    />
-                  </div>
-                </div>
-              );
-            }) : (
+            {liveMatches.length > 0 ? liveMatches.map(match => (
+              <TickerMatchItem key={match.id} match={match} />
+            )) : (
               <div className="flex items-center gap-2 mx-8 shrink-0">
                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-600 italic">No Active Pairings on Course</span>
               </div>
