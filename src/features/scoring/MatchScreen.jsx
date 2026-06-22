@@ -7,6 +7,9 @@ import { useUser } from '../../context/UserContext';
 import { calculatePlayingHandicaps, evaluateMatchStatus } from '../../utils/matchPlayEngine';
 import { MatchProbabilityBar } from '../probability/probability_engine'; 
 
+// 🎯 OFFLINE IMPLEMENTATION: Import the fallback storage mechanisms
+import { saveScoreOffline } from '../../utils/offlineScoringEngine';
+
 const ROUND_FORMATS = {
   1: 'Vegas',
   2: 'Greensomes',
@@ -269,6 +272,28 @@ export default function MatchScreen({ matchId, onBack }) {
       upsertPayload[`drinks_${partnerSlot}`] = scoreData.drinks;
     }
 
+    // 🎯 INTERCEPT PATH: Fall back to local queue storage if connection state drops out
+    if (!navigator.onLine) {
+      saveScoreOffline(matchId, currentHole, upsertPayload);
+      
+      // Optimistically update the internal array view locally so users aren't frozen out
+      setLiveMatchScores(prev => {
+        const next = [...prev];
+        const idx = next.findIndex(s => s.hole_id === activeHoleData.id);
+        if (idx !== -1) {
+          next[idx] = { ...next[idx], ...upsertPayload };
+        } else {
+          next.push({ id: Math.random(), ...upsertPayload });
+        }
+        return next;
+      });
+
+      setIsScoreSheetOpen(false);
+      if (currentHole < 18) setCurrentHole(prev => prev + 1);
+      return;
+    }
+
+    // Standard online pipeline path
     const { error } = await supabase.from('hole_scores').upsert(upsertPayload, { onConflict: 'matchup_id, hole_id' });
     if (error) return alert(error.message);
 
@@ -375,7 +400,7 @@ export default function MatchScreen({ matchId, onBack }) {
       
       <header className="flex-none bg-slate-900/95 backdrop-blur-xl border-b border-slate-800/60 flex flex-col z-[50] shadow-md w-full pt-2">
         
-        {/* Top Row: Nav & Info (Removed Strokes Pill) */}
+        {/* Top Row: Nav & Info */}
         <div className="flex justify-between items-center px-4 py-2.5">
           <div className="flex items-center gap-1.5 shrink-0">
             <button onClick={handleExitClick} className="text-[9px] font-black uppercase tracking-wider text-red-400 bg-red-500/10 border border-red-500/20 px-2 h-7 rounded-lg flex items-center justify-center gap-1 hover:bg-red-500/20 transition-all active:scale-95 cursor-pointer">
@@ -430,7 +455,7 @@ export default function MatchScreen({ matchId, onBack }) {
          <PremiumMapMatrix holeData={activeHoleData} insights={matchInsights} onLogScoreClick={() => setIsScoreSheetOpen(true)} />
       </main>
 
-      {/* 🎯 FIX: Action Bar with integrated hole navigation */}
+      {/* Action Bar with integrated hole navigation */}
       <div className="flex-none bg-slate-900/95 backdrop-blur-md border-t border-white/10 p-4 pb-6 z-[50] shadow-[0_-10px_30px_rgba(0,0,0,0.3)] flex items-center gap-3">
          <button 
            onClick={() => setCurrentHole(Math.max(1, currentHole - 1))} 
@@ -464,7 +489,7 @@ export default function MatchScreen({ matchId, onBack }) {
         par={par} 
         onSave={handleScoreSave} 
         existingData={currentScoreData} 
-        forceSingleScore={isSingleScoreFormat} 
+        forceSingleScore={isSingleScoreTeamFormat} 
       />
 
       {isScorecardOpen && <MatchScorecardView insights={matchInsights} allHolesData={allHoles} holeScores={liveMatchScores} onClose={() => setIsScorecardOpen(false)} />}

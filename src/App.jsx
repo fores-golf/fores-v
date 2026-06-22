@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // Identity Context
 import { UserProvider, useUser } from './context/UserContext';
@@ -21,6 +21,10 @@ import AdminConsoleView from './features/admin/AdminConsoleView';
 // WIRED: Imported your newly built points competition ledger component
 import MulligansMatrixView from './features/betting/MulligansMatrixView';
 
+// 🎯 OFFLINE FALLBACK ENGINE: Import background database synchronization routine
+import { supabase } from './config/supabaseClient';
+import { syncPendingScoresWithSupabase } from './utils/offlineScoringEngine';
+
 // --- MAIN ROUTER LOGIC ---
 function AppRouter() {
   const { session, player, isAuthLoading } = useUser();
@@ -30,6 +34,28 @@ function AppRouter() {
   // SECURE CHECK: Determine if the logged-in profile belongs to you (Trevor)
   // You can verify by your login email or your database row name string
   const isAdminUser = session?.user?.email === 'tjcolo87@gmail.com' || player?.name?.includes('Trevor');
+
+  // 🎯 REAL-TIME CELLULAR FALLBACK SYNC LISTENER
+  useEffect(() => {
+    const handleOnlineStatusChange = () => {
+      if (navigator.onLine) {
+        // Phone found signal! Push any locally cached hole score wagers back to the cloud
+        syncPendingScoresWithSupabase(supabase);
+      }
+    };
+
+    // Listen for connection restoration triggers across the device hardware interface
+    window.addEventListener('online', handleOnlineStatusChange);
+    
+    // Safety sweep on layout mount in case the app boots up online with left-over dead zone queues
+    if (navigator.onLine) {
+      syncPendingScoresWithSupabase(supabase);
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnlineStatusChange);
+    };
+  }, []);
 
   // 1. Show global boot spinner while checking identity
   if (isAuthLoading) {

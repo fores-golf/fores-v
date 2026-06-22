@@ -14,13 +14,11 @@ export function useChirpsData() {
       try {
         setLoading(true);
 
-        // 1. Fetch golfers for tagging index matrix
         const { data: golfersData } = await supabase
           .from('profiles')
           .select('id, name, team');
         if (golfersData) setGolfers(golfersData);
 
-        // 2. Fetch historic chirps
         const { data: historicalChirps, error } = await supabase
           .from('chirps')
           .select('id, message, created_at, profile_id, profiles(name, team, avatar_url)')
@@ -31,13 +29,11 @@ export function useChirpsData() {
           setChirps(historicalChirps.map(formatChirp));
         }
 
-        // 3. Realtime pipeline
         channelRef.current = supabase
           .channel('live-chirps')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, async (payload) => {
             let profileData = null;
 
-            // Only attempt lookup if the chirp belongs to a real profile user
             if (payload.new.profile_id) {
               const { data } = await supabase
                 .from('profiles')
@@ -47,15 +43,23 @@ export function useChirpsData() {
               profileData = data;
             }
 
-            const fullNewChirp = {
+            const formatted = formatChirp({
               id: payload.new.id,
               message: payload.new.message,
               created_at: payload.new.created_at,
               profiles: profileData,
               profile_id: payload.new.profile_id
-            };
+            });
 
-            setChirps(prev => [...prev, formatChirp(fullNewChirp)]);
+            // 🎯 PUSH NOTIFICATIONS GATEWAY: Trigger OS level banner alert
+            if (payload.new.profile_id !== player?.id && 'Notification' in window && Notification.permission === 'granted') {
+              new Notification(`💥 Chirp from ${formatted.sender}`, {
+                body: formatted.text.startsWith('[BROADCAST]') ? formatted.text.replace('[BROADCAST]', '').trim() : formatted.text,
+                icon: formatted.avatar || '/fores-v-logo.png'
+              });
+            }
+
+            setChirps(prev => [...prev, formatted]);
           })
           .subscribe();
 
@@ -66,12 +70,14 @@ export function useChirpsData() {
       }
     }
 
-    initializeChatEngine();
+    if (player?.id) {
+      initializeChatEngine();
+    }
 
     return () => {
       if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, []);
+  }, [player?.id]);
 
   const formatChirp = (item) => {
     const isBotNotification = !item.profile_id || item.message.startsWith('[BROADCAST]');
@@ -102,7 +108,6 @@ export function useChirpsData() {
     }
   };
 
-  // The live broadcast generator can now save without a profile_id
   const sendSystemBroadcast = async (announcementText) => {
     try {
       await supabase.from('chirps').insert({

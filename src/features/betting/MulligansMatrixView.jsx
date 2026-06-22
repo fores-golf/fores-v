@@ -30,7 +30,8 @@ function ClamCoin({ size = 'md' }) {
 }
 
 export default function MulligansMatrixView({ onBack }) {
-  const [mulliganBalance, setMulliganBalance] = useState(100);
+  // 🎯 UPDATE: Everyone starts with 0 tokens now
+  const [mulliganBalance, setMulliganBalance] = useState(0);
   const [currentUserProfile, setCurrentUserProfile] = useState(null);
   const [golfersList, setGolfersList] = useState([]);
   const [activeGames, setActiveGames] = useState([]);
@@ -98,7 +99,8 @@ export default function MulligansMatrixView({ onBack }) {
           .select('stakes_amount, winner_id, loser_id')
           .or(`winner_id.eq.${userProfile.id},loser_id.eq.${userProfile.id}`);
 
-        let calculatedBalance = 100;
+        // 🎯 UPDATE: Baseline changed from 100 to 0
+        let calculatedBalance = 0;
         if (logs) {
           calculatedBalance += logs.reduce((sum, log) => sum + log.amount, 0);
         }
@@ -155,17 +157,22 @@ export default function MulligansMatrixView({ onBack }) {
   const handleBroadcastGame = async (e) => {
     e.preventDefault();
     if (!currentUserProfile || invitedPlayerIds.length === 0) return;
+
+    // 🎯 VALIDATION GATEWAY: Prevent staging game if user doesn't have enough tokens
+    if (mulliganBalance < Number(pointStakes)) {
+      alert(`Challenge Denied: You need at least ${pointStakes} tokens in your stash to broadcast this stake.`);
+      return;
+    }
+
     setIsSubmitting(true);
-    
     const targetOpponentId = invitedPlayerIds[0];
 
     try {
-      // Create the core challenge match record map
       const { data: gameData, error: gameError } = await supabase
         .from('wagers')
         .insert({
           creator_id: currentUserProfile.id,
-          opponent_id: targetOpponentId, // Added explicit column map mapping
+          opponent_id: targetOpponentId, 
           game_type: selectedFormat,
           stakes_amount: Number(pointStakes),
           world_round: selectedWorld,
@@ -175,7 +182,6 @@ export default function MulligansMatrixView({ onBack }) {
 
       if (gameError) throw gameError;
 
-      // Map participant junction structures
       const participantRows = [
         { wager_id: gameData.id, player_id: currentUserProfile.id, payout_status: 'pending' },
         { wager_id: gameData.id, player_id: targetOpponentId, payout_status: 'pending' }
@@ -194,10 +200,17 @@ export default function MulligansMatrixView({ onBack }) {
     }
   };
 
-  const handleAcceptInvite = async (gameId) => {
+  const handleAcceptInvite = async (game) => {
     if (!currentUserProfile) return;
+
+    // 🎯 VALIDATION GATEWAY: Prevent accepting challenge if user doesn't have enough tokens
+    if (mulliganBalance < Number(game.stakes_amount)) {
+      alert(`Acceptance Blocked: You need at least ${game.stakes_amount} tokens in your stash to join this battle line-up.`);
+      return;
+    }
+
     try {
-      await supabase.from('wagers').update({ status: 'active' }).eq('id', gameId);
+      await supabase.from('wagers').update({ status: 'active' }).eq('id', game.id);
       await fetchCoreLedgerData();
     } catch (err) {
       alert("Failed joining battle lineup: " + err.message);
@@ -273,7 +286,18 @@ export default function MulligansMatrixView({ onBack }) {
         {/* TAB 1: LIVE ARENA */}
         {activeTab === 'arena' && (
           <div className="space-y-4">
-            <button onClick={() => setShowCreateModal(true)} className="w-full bg-rose-500 hover:bg-rose-400 border-4 border-black py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-[0_4px_0_#991b1b,0_4px_0_#000] active:translate-y-1 active:shadow-[0_0px_0_#000] transition-all">💥 CHALLENGE PLAYER</button>
+            <button 
+              onClick={() => {
+                if (mulliganBalance <= 0) {
+                  alert("Challenge Prevented: You cannot stage a wager with 0 tokens. Top up your token stash first.");
+                  return;
+                }
+                setShowCreateModal(true);
+              }} 
+              className="w-full bg-rose-500 hover:bg-rose-400 border-4 border-black py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest text-white shadow-[0_4px_0_#991b1b,0_4px_0_#000] active:translate-y-1 active:shadow-[0_0px_0_#000] transition-all"
+            >
+              💥 CHALLENGE PLAYER
+            </button>
 
             <div className="space-y-3">
               <h2 className="text-xs font-black uppercase tracking-widest text-yellow-400 drop-shadow-[1px_1px_0_#000]">🎯 ACTIVE CHALLENGES</h2>
@@ -290,7 +314,6 @@ export default function MulligansMatrixView({ onBack }) {
                   const hostName = isCreator ? "YOU" : (hostProfile?.name || "PLAYER 1");
                   const hostAvatar = hostProfile?.avatar_url || 'https://api.dicebear.com/7.x/pixel-art/svg?seed=' + hostName;
 
-                  // Explicit opponent profile extraction code
                   const opponentId = game.opponent_id || game.wager_participants?.find(p => String(p.player_id) !== String(game.creator_id))?.player_id;
                   const challengerProfile = golfersList.find(g => String(g.id) === String(opponentId));
                   const isYouChallenged = String(opponentId) === String(currentUserProfile?.id);
@@ -355,7 +378,7 @@ export default function MulligansMatrixView({ onBack }) {
                         </div>
                         <div className="flex items-center gap-2">
                           {isYouChallenged && game.status === 'pending' && (
-                            <button onClick={() => handleAcceptInvite(game.id)} className="bg-emerald-400 hover:bg-emerald-300 text-black text-[10px] font-black border-2 border-black px-2.5 py-1.5 rounded-lg shadow-[2px_2px_0_#000] active:translate-y-0.5">⚔️ ACCEPT</button>
+                            <button onClick={() => handleAcceptInvite(game)} className="bg-emerald-400 hover:bg-emerald-300 text-black text-[10px] font-black border-2 border-black px-2.5 py-1.5 rounded-lg shadow-[2px_2px_0_#000] active:translate-y-0.5">⚔️ ACCEPT</button>
                           )}
                           {(isCreator || isYouChallenged) && game.status === 'active' && (
                             <button onClick={() => { setShowResolveModal(game); setWinnerId(game.creator_id); setLoserId(opponentId || ''); }} className="bg-yellow-400 hover:bg-yellow-300 text-black border-2 border-black font-black uppercase text-[10px] tracking-wide px-3 py-1.5 rounded-lg shadow-[2px_2px_0_#000] active:translate-y-0.5">🏁 END GAME</button>
@@ -396,11 +419,12 @@ export default function MulligansMatrixView({ onBack }) {
             <h2 className="text-xs font-black uppercase tracking-widest text-cyan-400 drop-shadow-[1px_1px_0_#000]">🏆 CURRENT STANDINGS</h2>
             <div className="bg-black border-4 border-black rounded-xl divide-y-2 divide-black/60 overflow-hidden shadow-[4px_4px_0_#000]">
               {golfersList.map((golfer, index) => {
+                // 🎯 UPDATE: Baseline shifted down to 0 tokens standard
                 const claimed = activeGames.reduce((acc, g) => {
                   if (g.status === 'completed' && g.winner_id === golfer.id) return acc + g.stakes_amount;
                   if (g.status === 'completed' && g.loser_id === golfer.id) return acc - g.stakes_amount;
                   return acc;
-                }, 100);
+                }, 0);
                 return (
                   <div key={golfer.id} className="p-3 flex justify-between items-center bg-purple-950/20 hover:bg-purple-900/20">
                     <div className="flex items-center gap-3">
@@ -485,7 +509,7 @@ export default function MulligansMatrixView({ onBack }) {
               <label className="text-[9px] font-black uppercase text-white tracking-wider">STAKES AMOUNT</label>
               <input type="number" value={pointStakes} onChange={(e) => setPointStakes(e.target.value)} min="1" className="w-full bg-black border-2 border-black text-yellow-400 text-xl font-mono font-black p-2.5 rounded-xl text-center focus:outline-none" />
             </div>
-            <div className="pt-2"><button type="button" onClick={handleBroadcastGame} className="w-full bg-emerald-400 text-black border-4 border-black font-black py-3.5 rounded-xl uppercase text-xs tracking-widest shadow-[0_4px_0_#000]">📡 SEND CHALLENGE</button></div>
+            <div className="pt-2"><button type="submit" onClick={handleBroadcastGame} className="w-full bg-emerald-400 text-black border-4 border-black font-black py-3.5 rounded-xl uppercase text-xs tracking-widest shadow-[0_4px_0_#000]">📡 SEND CHALLENGE</button></div>
           </div>
         </div>
       )}

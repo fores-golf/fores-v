@@ -9,6 +9,13 @@ export default function ChirpsView({ onBack }) {
   
   const feedEndRef = useRef(null);
 
+  // 🎯 PUSH NOTIFICATIONS: Request native platform permissions on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
+
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chirps]);
@@ -46,12 +53,10 @@ export default function ChirpsView({ onBack }) {
     setTypedMessage('');
   };
 
-  // Helper macro button to test the streaming capabilities
   const triggerMockBotBroadcast = () => {
     sendSystemBroadcast('Mickey Salva just drained a 40-foot putt on Hole 9 for Eagle! Slanted Clams take the lead.');
   };
 
-  // Parser to convert @ mentions into glowing elements
   const renderMessageContent = (text) => {
     if (text.startsWith('[BROADCAST]')) {
       return text.replace('[BROADCAST]', '').trim();
@@ -79,7 +84,6 @@ export default function ChirpsView({ onBack }) {
   return (
     <div className="min-h-[100dvh] bg-[#090d16] text-white font-sans flex flex-col pb-safe fixed inset-0 z-40">
       
-      {/* Premium Glass Header */}
       <div className="px-5 py-4 flex justify-between items-center bg-[#0f172a]/90 backdrop-blur-xl border-b border-white/5 z-10">
         <button onClick={onBack} className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-1 active:scale-95 transition-transform">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15 19l-7-7 7-7"></path></svg>
@@ -89,18 +93,15 @@ export default function ChirpsView({ onBack }) {
           <span className="w-2 h-2 rounded-full bg-[#34d399] animate-pulse"></span>
           Chirps Board
         </h1>
-        {/* STAT SHARE BUTTON REMOVED FROM THIS LOCATION */}
-        <div className="w-9 h-5 pointer-events-none" /> {/* Empty spatial stabilizer to keep title cleanly centered */}
+        <div className="w-9 h-5 pointer-events-none" />
       </div>
 
-      {/* --- CHAT TIMELINE CONTAINER --- */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4 style-scrolling-touch">
         {chirps.map((chirp) => {
           const isClam = chirp.team === 'Slanted Clams';
           const isBrothel = chirp.team === 'Clam Brothelmen';
           const containsStats = chirp.text.includes('[COMBINE_STAT]');
 
-          // 1. Render layout for automated broadcast alerts
           if (chirp.isBot) {
             return (
               <div key={chirp.id} className="w-full py-1.5 px-4 bg-gradient-to-r from-amber-500/10 via-[#0f172a] to-transparent border-l-4 border-amber-500 rounded-r-xl my-2 animate-fade-in flex items-start gap-2.5">
@@ -113,7 +114,6 @@ export default function ChirpsView({ onBack }) {
             );
           }
 
-          // 2. Standard player layout
           return (
             <div key={chirp.id} className={`flex gap-3 items-start animate-fade-in max-w-[88%] ${containsStats ? 'w-full max-w-sm' : ''}`}>
               <div className={`w-8 h-8 rounded-full shrink-0 border overflow-hidden flex items-center justify-center text-[10px] font-black ${
@@ -130,7 +130,6 @@ export default function ChirpsView({ onBack }) {
                   <span className="text-[8px] font-bold text-slate-600 tabular-nums">{chirp.timestamp}</span>
                 </div>
 
-                {/* --- CHIRP CARD GRADIENTS --- */}
                 <div className={`border p-3.5 shadow-xl backdrop-blur-md text-sm leading-relaxed ${
                   isClam ? 'bg-gradient-to-br from-blue-950/50 to-[#0f172a] border-blue-500/20 text-blue-50 rounded-2xl rounded-tl-none shadow-blue-500/5' :
                   isBrothel ? 'bg-gradient-to-br from-red-950/50 to-[#0f172a] border-red-500/20 text-red-50 rounded-2xl rounded-tl-none shadow-red-500/5' :
@@ -138,7 +137,6 @@ export default function ChirpsView({ onBack }) {
                 }`}>
                   {renderMessageContent(chirp.text)}
 
-                  {/* --- INTERACTIVE MULTIMEDIA EMBED --- */}
                   {containsStats && (
                     <div className="mt-3 bg-black/50 border border-white/10 rounded-xl p-3 flex flex-col gap-2.5 shadow-inner">
                       <div className="flex justify-between items-center border-b border-white/5 pb-1.5">
@@ -165,7 +163,6 @@ export default function ChirpsView({ onBack }) {
         <div ref={feedEndRef} />
       </div>
 
-      {/* --- BOTTOM INTERACTION CONTROL --- */}
       <div className="p-4 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/5 relative">
         {showSuggestions && (
           <div className="absolute bottom-full left-4 right-4 bg-[#1e293b] rounded-2xl border border-white/10 shadow-2xl max-h-40 overflow-y-auto mb-2 divide-y divide-white/5 z-20 backdrop-blur-xl">
