@@ -27,7 +27,7 @@ const AVAILABLE_BADGES = [
 ];
 
 export default function ProfileView({ onBack }) {
-  const { logout, refreshIdentity } = useUser(); // Kept for global sync and logout
+  const { logout, refreshIdentity } = useUser(); 
   const { profile, loading, updating, updateProfile, uploadAvatar } = useProfileData();
   
   const [isEditing, setIsEditing] = useState(false);
@@ -50,7 +50,6 @@ export default function ProfileView({ onBack }) {
     short_game_rating: ''
   });
 
-  // Initialize local state from the hook's profile when entering Edit Mode.
   useEffect(() => {
     if (profile && isEditing) {
       setFormData({
@@ -65,7 +64,6 @@ export default function ProfileView({ onBack }) {
     }
   }, [profile, isEditing]);
 
-  // Handle badge checking safely
   useEffect(() => {
     if (profile?.id) {
       checkAndAwardBadges();
@@ -116,7 +114,6 @@ export default function ProfileView({ onBack }) {
       }).map(b => b.id);
 
       if (badgesToUnlock.length > 0) {
-        // FIXED: Using Set to ensure no duplicates after safe array parsing
         const updatedUnlockedList = [...new Set([...unlockedBadgeIds, ...badgesToUnlock])];
         
         await updateProfile({ unlocked_badges: updatedUnlockedList });
@@ -176,17 +173,37 @@ export default function ProfileView({ onBack }) {
   const handleImageUpload = async (e) => {
     const { success, error } = await uploadAvatar(e);
     if (success) {
-      await refreshIdentity(); // Sync global app state
+      await refreshIdentity(); 
     } else {
       alert('Error uploading image: ' + error);
     }
   };
 
-  // --- TEXT DATA SAVE ENGINE ---
+  // --- TEXT DATA SAVE ENGINE WITH DUAL-TABLE SYNC ---
   const handleSaveProfile = async () => {
+    // 1. Save directly to the profiles table
     const { success, error } = await updateProfile(formData);
+    
     if (success) {
-      await refreshIdentity(); // Sync global app state
+      try {
+        // 2. 🎯 AUTOMATIC DOUBLE-WRITE: Synchronize math metrics across to the players table
+        await supabase
+          .from('players')
+          .update({
+            name: formData.name,
+            driving_dist: formData.driving_dist ? parseInt(formData.driving_dist, 10) : null,
+            gir_percentage: formData.gir_percentage ? parseInt(formData.gir_percentage, 10) : null,
+            avg_putts: formData.avg_putts ? parseFloat(formData.avg_putts) : null,
+            power_rating: formData.power_rating ? parseInt(formData.power_rating, 10) : null,
+            short_game_rating: formData.short_game_rating ? parseInt(formData.short_game_rating, 10) : null
+          })
+          .or(`id.eq.${profile.id},auth_id.eq.${profile.auth_id || profile.id}`);
+
+      } catch (syncErr) {
+        console.error('Simulation metrics failed to sync over to players table:', syncErr.message);
+      }
+
+      await refreshIdentity(); 
       setIsEditing(false);
     } else {
       alert('Error saving profile data: ' + error);
