@@ -384,7 +384,10 @@ export default function MatchScreen({ matchId, onBack }) {
 
   const rawFormat = matchData?.format && matchData.format !== 'TBD' ? matchData.format : ROUND_FORMATS[matchData?.round] || '1v1';
   const formatStr = String(rawFormat).trim().toLowerCase();
+  
+  // Adjusted Scope: Defined cleanly for the general JSX layout render tree
   const isSingleScoreFormat = formatStr === '1v1' || formatStr === 'scramble' || formatStr === 'greensomes';
+  const isSingleScoreTeamFormat = formatStr === 'scramble' || formatStr === 'greensomes';
 
   const p1FirstName = displayNames.p1 !== 'TBD' ? displayNames.p1.split(' ')[0] : 'P1';
   const p2FirstName = displayNames.p2 ? displayNames.p2.split(' ')[0] : null;
