@@ -59,7 +59,7 @@ export default function ChirpsView({ onBack }) {
         <div className="w-9 h-5 pointer-events-none" />
       </div>
 
-      {/* CHAT DISPLAY PANEL */}
+      {/* MESSAGES WINDOW */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4 scrolling-touch">
         {loading ? (
           <div className="h-full w-full flex items-center justify-center">
@@ -68,7 +68,7 @@ export default function ChirpsView({ onBack }) {
         ) : chirps.length === 0 ? (
           <div className="h-full w-full flex flex-col items-center justify-center text-slate-500 gap-2">
             <span className="text-2xl">💬</span>
-            <p className="text-xs font-semibold">No active chirps. Send a message to get started!</p>
+            <p className="text-xs font-semibold">No active chirps yet.</p>
           </div>
         ) : (
           chirps.map((chirp) => {
@@ -104,7 +104,7 @@ export default function ChirpsView({ onBack }) {
         <div ref={feedEndRef} />
       </div>
 
-      {/* INPUT ACTIONS CONTAINER */}
+      {/* INPUT SYSTEM */}
       <div className="p-4 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/5 shrink-0 relative pb-safe">
         <form onSubmit={handleSend} className="flex gap-2 max-w-md mx-auto">
           <input
@@ -126,7 +126,7 @@ export default function ChirpsView({ onBack }) {
         </form>
       </div>
 
-      {/* ON-SCREEN DIAGNOSTIC OVERLAY */}
+      {/* ON-SCREEN MONITOR */}
       <div className="bg-slate-950 text-[10px] p-2 font-mono text-amber-400 border-t border-white/10 shrink-0 max-h-16 overflow-y-auto">
         <span className="text-slate-500 font-bold mr-1">[MOBILE STATUS]:</span> 
         {debugLog}
