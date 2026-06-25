@@ -32,9 +32,11 @@ export default function ChirpsView({ onBack }) {
     const words = val.split(' ');
     const lastWord = words[words.length - 1];
 
-    // Trigger looking up names within normalized golfers dictionary
+    // Trigger lookup panel when current string fragment starts with '@'
     if (lastWord.startsWith('@') && lastWord.length > 1) {
       const query = lastWord.substring(1).toLowerCase();
+      
+      // Filter choices out of the normalized players pool
       const filtered = golfers.filter(g => g.name?.toLowerCase().includes(query));
       setSuggestions(filtered);
       setShowSuggestions(filtered.length > 0);
@@ -47,7 +49,7 @@ export default function ChirpsView({ onBack }) {
     const words = typedMessage.split(' ');
     words.pop(); // Drop the prefix typed chunk (e.g. "@mic")
     const formattedName = name.replace(/\s+/g, ''); 
-    words.push(`@${formattedName} `); // Append clean tagged username back into line string
+    words.push(`@${formattedName} `); // Append clean formatted player tag back into text string
     setTypedMessage(words.join(' '));
     setShowSuggestions(false);
   };
@@ -98,7 +100,7 @@ export default function ChirpsView({ onBack }) {
         <div className="w-9 h-5 pointer-events-none" />
       </div>
 
-      {/* PUSH NOTIFICATION ENHANCEMENT HEADER DISPLAY */}
+      {/* PUSH NOTIFICATION PERMISSION BANNER */}
       {notificationPermission === 'default' && (
         <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-4 py-2.5 flex justify-between items-center shrink-0 shadow-lg z-10 animate-fade-in">
           <p className="text-[11px] font-bold tracking-tight text-white/90">
@@ -113,7 +115,7 @@ export default function ChirpsView({ onBack }) {
         </div>
       )}
 
-      {/* CHAT THREAD PORT */}
+      {/* CHAT THREAD VIEWPORT */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4 scrolling-touch">
         {loading ? (
           <div className="h-full w-full flex items-center justify-center">
@@ -158,10 +160,10 @@ export default function ChirpsView({ onBack }) {
         <div ref={feedEndRef} />
       </div>
 
-      {/* INPUT SYSTEM CONTROL CONTAINER */}
+      {/* INPUT SYSTEM CONTROL BAR */}
       <div className="p-4 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/5 shrink-0 relative pb-safe">
         
-        {/* Dynamic Autocomplete suggestions display portal */}
+        {/* Dynamic Autocomplete Modal Menu */}
         {showSuggestions && (
           <div className="absolute bottom-full left-4 right-4 bg-[#1e293b] rounded-2xl border border-white/10 shadow-2xl max-h-40 overflow-y-auto mb-2 divide-y divide-white/5 z-20">
             {suggestions.map((golfer) => (
@@ -169,12 +171,11 @@ export default function ChirpsView({ onBack }) {
                 key={golfer.id}
                 type="button"
                 onClick={() => handleSelectGolfer(golfer.name)}
-                className="w-full text-left p-3 flex justify-between items-center hover:bg-white/5 text-white"
+                className="w-full text-left p-3 flex justify-between items-center hover:bg-white/5 text-white active:bg-white/10"
               >
-                {/* Visual rendering uses golfer's display name, even though system matches by auth_id behind the scenes */}
                 <span className="font-black text-sm">@{golfer.name.replace(/\s+/g, '')}</span>
                 <span className="text-[9px] font-extrabold px-2 py-0.5 rounded border border-white/10 bg-slate-800">
-                  {golfer.team || 'Free Agent'}
+                  {golfer.team}
                 </span>
               </button>
             ))}
@@ -201,7 +202,7 @@ export default function ChirpsView({ onBack }) {
         </form>
       </div>
 
-      {/* MOBILE CONSOLE OUTPUT STATUS */}
+      {/* MOBILE CONSOLE OUTPUT PANELS */}
       <div className="bg-slate-950 text-[10px] p-2 font-mono text-amber-400 border-t border-white/10 shrink-0 max-h-16 overflow-y-auto">
         <span className="text-slate-500 font-bold mr-1">[MOBILE STATUS]:</span> 
         {debugLog}
