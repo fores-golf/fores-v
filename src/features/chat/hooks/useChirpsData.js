@@ -8,23 +8,23 @@ export function useChirpsData() {
   const [golfers, setGolfers] = useState([]); 
   const [loading, setLoading] = useState(true);
   
-  // Use refs to store latest state arrays to prevent real-time event listener closures from becoming stale
+  // Real-time troubleshooting log for mobile testing
+  const [debugLog, setDebugLog] = useState('System initialized. Waiting for action...');
+
   const golfersRef = useRef([]);
   const channelRef = useRef(null);
 
-  // Sync ref with state updates
   useEffect(() => {
     golfersRef.current = golfers;
   }, [golfers]);
 
-  // Helper formatting function isolated from closure traps
   const formatChirp = (item, derivedProfiles) => {
-    const isBotNotification = !item.profile_id || item.message.startsWith('[BROADCAST]');
+    const isBotNotification = !item.profile_id || item.message?.startsWith('[BROADCAST]');
     const profile = derivedProfiles || item.profiles;
     
     return {
       id: item.id || Math.random().toString(36).substr(2, 9),
-      text: item.message,
+      text: item.message || '',
       timestamp: new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       sender: isBotNotification ? 'BROADCAST BOT' : (profile?.name || 'Anonymous'),
       team: isBotNotification ? 'Tournament Officials' : (profile?.team || ''),
@@ -39,35 +39,34 @@ export function useChirpsData() {
     async function initializeChatEngine() {
       try {
         setLoading(true);
+        setDebugLog('Fetching golfers and historical logs...');
 
-        // 1. Grab all profile/golfer metadata
-        const { data: golfersData } = await supabase
+        // 1. Fetch Profiles
+        const { data: golfersData, error: profileErr } = await supabase
           .from('profiles')
           .select('id, name, team, avatar_url');
         
-        if (golfersData && isMounted) {
-          setGolfers(golfersData);
-        }
+        if (profileErr) throw new Error(`Profiles Fetch Error: ${profileErr.message}`);
+        if (golfersData && isMounted) setGolfers(golfersData);
 
-        // 2. Fetch last 50 historical messages
-        const { data: historicalChirps, error } = await supabase
+        // 2. Fetch last 50 chirps
+        const { data: historicalChirps, error: chirpsErr } = await supabase
           .from('chirps')
           .select('id, message, created_at, profile_id, profiles(name, team, avatar_url)')
           .order('created_at', { ascending: true })
           .limit(50);
 
-        if (!error && historicalChirps && isMounted) {
+        if (chirpsErr) throw new Error(`Chirps Fetch Error: ${chirpsErr.message}`);
+        if (historicalChirps && isMounted) {
           setChirps(historicalChirps.map(item => formatChirp(item, null)));
+          setDebugLog(`Successfully loaded ${historicalChirps.length} historical chirps.`);
         }
 
-        // 3. Setup real-time channel subscription
+        // 3. Real-time Subscription Channel
         channelRef.current = supabase
           .channel('live-chirps')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
-            
-            // OPTIMIZATION: Look up profile instantly via local reference map instead of making an async DB query on every message stream
             const matchingProfile = golfersRef.current.find(g => g.id === payload.new.profile_id);
-
             const formatted = formatChirp({
               id: payload.new.id,
               message: payload.new.message,
@@ -75,65 +74,71 @@ export function useChirpsData() {
               profile_id: payload.new.profile_id
             }, matchingProfile);
 
-            // 🎯 PUSH NOTIFICATIONS GATEWAY
-            if (payload.new.profile_id !== player?.id && 'Notification' in window && Notification.permission === 'granted') {
+            // Push Notifications Gateway
+            if (payload.new.profile_id !== (player?.id || player?.auth_id) && 'Notification' in window && Notification.permission === 'granted') {
               new Notification(`💥 Chirp from ${formatted.sender}`, {
                 body: formatted.text.startsWith('[BROADCAST]') ? formatted.text.replace('[BROADCAST]', '').trim() : formatted.text,
                 icon: formatted.avatar || '/fores-v-logo.png'
               });
             }
 
-            // Deduplicate safety check
             setChirps(prev => {
               if (prev.some(c => c.id === formatted.id)) return prev;
               return [...prev, formatted];
             });
           })
-          .subscribe();
+          .subscribe((status) => {
+            setDebugLog(`Realtime subscription status: ${status}`);
+          });
 
       } catch (err) {
-        console.error('Chat engine initialization failure:', err.message);
+        setDebugLog(`💥 Init Error: ${err.message}`);
+        console.error(err);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
 
-    if (player?.id) {
+    // Support standard database profile IDs or standard Supabase auth handles
+    const targetUserId = player?.id || player?.auth_id;
+    if (targetUserId) {
       initializeChatEngine();
+    } else {
+      setDebugLog('⚠️ Blocked Engine: No valid player.id or player.auth_id detected in context.');
+      setLoading(false);
     }
 
     return () => {
       isMounted = false;
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
-      }
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, [player?.id]);
+  }, [player?.id, player?.auth_id]);
 
   const sendChirp = async (textString) => {
+    // Dynamic fallbacks to catch exact variations of identity providers
+    const activeUserId = player?.id || player?.auth_id;
+    
+    setDebugLog(`Attempting to send. Message length: ${textString?.length}. User ID: ${activeUserId}`);
+
+    if (!activeUserId) {
+      setDebugLog('❌ Send blocked: Both player.id and player.auth_id are missing.');
+      return;
+    }
+
     try {
-      if (!player?.id || !textString.trim()) return;
+      const { data, error } = await supabase
+        .from('chirps')
+        .insert({
+          profile_id: activeUserId, // Fallback hooks maps perfectly here
+          message: textString.trim()
+        })
+        .select();
 
-      const { error } = await supabase.from('chirps').insert({
-        profile_id: player.id,
-        message: textString.trim()
-      });
+      if (error) {
+        setDebugLog(`❌ Database Reject: ${error.message} (Code: ${error.code})`);
+        return;
+      }
 
-      if (error) throw error;
+      setDebugLog(`✅ Successfully saved! Payload ID: ${data?.[0]?.id || 'unknown'}`);
     } catch (err) {
-      console.error('Failed to broadcast chirp:', err.message);
-    }
-  };
-
-  const sendSystemBroadcast = async (announcementText) => {
-    try {
-      await supabase.from('chirps').insert({
-        message: `[BROADCAST] ${announcementText}`
-      });
-    } catch (e) {
-      console.error('System broadcast failed:', e.message);
-    }
-  };
-
-  return { chirps, golfers, loading, sendChirp, sendSystemBroadcast };
-}
+      setDebugLog(`💥 Catch
