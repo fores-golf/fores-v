@@ -11,8 +11,10 @@ export function useChirpsData() {
   const sessionTeam = currentUser.team || '';
 
   const [chirps, setChirps] = useState([]);
+  const [golfers, setGolfers] = useState([]); // Restored for autocomplete tracking
   const [loading, setLoading] = useState(true);
-  const [debugLog, setDebugLog] = useState('Initializing Engine...');
+  const [notificationPermission, setNotificationPermission] = useState('default');
+  const [debugLog, setDebugLog] = useState('Initializing Feature Pack...');
 
   const channelRef = useRef(null);
   const userSessionRef = useRef({ id: sessionAuthId, name: sessionName, team: sessionTeam });
@@ -20,6 +22,23 @@ export function useChirpsData() {
   useEffect(() => {
     userSessionRef.current = { id: sessionAuthId, name: sessionName, team: sessionTeam };
   }, [sessionAuthId, sessionName, sessionTeam]);
+
+  // Read active platform permission state on mount
+  useEffect(() => {
+    if ('Notification' in window) {
+      setNotificationPermission(Notification.permission);
+    }
+  }, []);
+
+  const requestPlatformPermissions = async () => {
+    if (!('Notification' in window)) {
+      setDebugLog('⚠️ Notifications not supported on this mobile browser.');
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    setDebugLog(`Notification permission: ${permission}`);
+  };
 
   const formatChirp = (item) => {
     const isBotNotification = !item.user_id || item.message?.startsWith('[BROADCAST]');
@@ -37,7 +56,7 @@ export function useChirpsData() {
     let isMounted = true;
 
     if (!sessionAuthId) {
-      setDebugLog('⚠️ Waiting for valid User ID configuration...');
+      setDebugLog('⚠️ Device identity hold: Syncing auth profile...');
       setLoading(false);
       return;
     }
@@ -45,8 +64,18 @@ export function useChirpsData() {
     async function initializeChatEngine() {
       try {
         setLoading(true);
-        setDebugLog('Synchronizing database feed...');
+        setDebugLog('Caching directory & historic feeds...');
 
+        // 1. Safe fetch of participant directories for autocomplete mapping
+        // NOTE: If you use a table other than 'profiles' for users, change the table string here!
+        const { data: golfersData } = await supabase
+          .from('profiles')
+          .select('id, name, team')
+          .throwOnError();
+        
+        if (golfersData && isMounted) setGolfers(golfersData);
+
+        // 2. Load historic chat items
         const { data: historicalChirps, error: chirpsErr } = await supabase
           .from('chirps')
           .select('id, message, created_at, user_id, sender_name, sender_team')
@@ -54,29 +83,44 @@ export function useChirpsData() {
           .limit(50);
 
         if (chirpsErr) {
-          setDebugLog(`❌ Query Denied: ${chirpsErr.message}`);
+          setDebugLog(`❌ Database Schema Rejection: ${chirpsErr.message}`);
           if (isMounted) setLoading(false);
           return;
         }
 
         if (historicalChirps && isMounted) {
           setChirps(historicalChirps.map(formatChirp));
-          setDebugLog('🚀 System online and active.');
+          setDebugLog('🚀 System active. Live streams established.');
         }
 
+        // 3. Mount Stream Subscription Pipeline
         channelRef.current = supabase
           .channel('live-chirps-feed')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
             if (!isMounted) return;
             const formatted = formatChirp(payload.new);
+
+            // 🎯 NATIVE PUSH NOTIFICATION DISPATCHER
+            // Alert rules: Ensure it wasn't sent by yourself, and verify system permissions are enabled
+            if (payload.new.user_id !== userSessionRef.current.id && 'Notification' in window && Notification.permission === 'granted') {
+              const cleanText = formatted.text.replace('[BROADCAST]', '').trim();
+              const standardCleanName = userSessionRef.current.name.replace(/\s+/g, '').toLowerCase();
+              
+              // Only trigger banner if it's a general official broadcast or if the player's clean username gets tagged
+              if (formatted.isBot || cleanText.toLowerCase().includes(`@${standardCleanName}`)) {
+                new Notification(`💥 Trash Talk Alert from ${formatted.sender}`, {
+                  body: cleanText,
+                  icon: '/favicon.ico'
+                });
+              }
+            }
+
             setChirps(prev => {
               if (prev.some(c => c.id === formatted.id)) return prev;
               return [...prev, formatted];
             });
           })
-          .subscribe((status) => {
-            if (status === 'SUBSCRIBED') setDebugLog('✅ Live channel active.');
-          });
+          .subscribe();
 
       } catch (err) {
         setDebugLog(`💥 Crash: ${err.message}`);
@@ -95,31 +139,29 @@ export function useChirpsData() {
 
   const sendChirp = async (textString) => {
     if (!userSessionRef.current.id) {
-      setDebugLog('❌ Cancelled Send: Session user_id is missing.');
+      setDebugLog('❌ Cancelled Send: Missing authentication session token.');
       return;
     }
 
     try {
-      setDebugLog('Sending message data...');
-      
-      const { data, error } = await supabase
+      setDebugLog('Syncing transmission...');
+      const { error } = await supabase
         .from('chirps')
         .insert({
           user_id: userSessionRef.current.id,
           message: textString.trim(),
           sender_name: userSessionRef.current.name,
           sender_team: userSessionRef.current.team
-        })
-        .select();
+        });
 
       if (error) {
-        setDebugLog(`❌ Reject: ${error.message} (Code: ${error.code})`);
+        setDebugLog(`❌ Reject: ${error.message}`);
         return;
       }
 
-      setDebugLog('✅ Message saved successfully!');
+      setDebugLog('✅ Sent!');
     } catch (err) {
-      setDebugLog(`💥 Thread error: ${err.message}`);
+      setDebugLog(`💥 Write Error: ${err.message}`);
     }
   };
 
@@ -131,9 +173,18 @@ export function useChirpsData() {
         sender_team: 'Tournament Officials'
       });
     } catch (e) {
-      setDebugLog(`💥 Broadcast err: ${e.message}`);
+      setDebugLog(`💥 Broadcast failure: ${e.message}`);
     }
   };
 
-  return { chirps, loading, sendChirp, sendSystemBroadcast, debugLog };
+  return { 
+    chirps, 
+    golfers, 
+    loading, 
+    sendChirp, 
+    sendSystemBroadcast, 
+    notificationPermission, 
+    requestPlatformPermissions, 
+    debugLog 
+  };
 }
