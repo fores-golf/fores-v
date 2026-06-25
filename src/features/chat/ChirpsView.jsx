@@ -2,25 +2,24 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useChirpsData } from './hooks/useChirpsData';
 
 export default function ChirpsView({ onBack }) {
-  const { chirps, golfers, loading, sendChirp, sendSystemBroadcast } = useChirpsData();
+  const { chirps, golfers, loading, sendChirp, sendSystemBroadcast, debugLog } = useChirpsData();
   const [typedMessage, setTypedMessage] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showUiDebugger, setShowUiDebugger] = useState(true); // Control diagnostic tray visibility on mobile
   
   const feedEndRef = useRef(null);
 
-  // Request native platform permissions on mount
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }, []);
 
-  // Smooth scroll logic locked to data updates
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       feedEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 80); // Micro-delay allows browser viewport layout calculation to finalize on mobile
+    }, 80);
     return () => clearTimeout(timeoutId);
   }, [chirps]);
 
@@ -43,7 +42,7 @@ export default function ChirpsView({ onBack }) {
 
   const handleSelectGolfer = (name) => {
     const words = typedMessage.split(' ');
-    words.pop(); // Remove the partial string `@name`
+    words.pop();
     const formattedName = name.replace(/\s+/g, ''); 
     words.push(`@${formattedName} `); 
     setTypedMessage(words.join(' '));
@@ -87,7 +86,6 @@ export default function ChirpsView({ onBack }) {
   }
 
   return (
-    /* Changed fixed to h-[100dvh] w-screen flex flex-col to better stabilize viewports under dynamic mobile soft keyboards */
     <div className="h-[100dvh] w-screen bg-[#090d16] text-white font-sans flex flex-col fixed inset-0 z-40 overflow-hidden">
       
       {/* HEADER BAR */}
@@ -100,7 +98,12 @@ export default function ChirpsView({ onBack }) {
           <span className="w-2 h-2 rounded-full bg-[#34d399] animate-pulse"></span>
           Chirps Board
         </h1>
-        <div className="w-9 h-5 pointer-events-none" />
+        <button 
+          onClick={() => setShowUiDebugger(!showUiDebugger)}
+          className="text-[10px] font-mono px-2 py-1 rounded bg-slate-800 border border-white/10 text-amber-400"
+        >
+          {showUiDebugger ? 'Hide Logs' : 'Logs'}
+        </button>
       </div>
 
       {/* MESSAGES CONTAINER */}
@@ -182,7 +185,6 @@ export default function ChirpsView({ onBack }) {
                 onClick={() => handleSelectGolfer(golfer.name)}
                 className="w-full text-left p-3 flex justify-between items-center hover:bg-white/5 transition-colors active:bg-white/10"
               >
-                {/* Fixed the missing open bracket compilation bug here */}
                 <span className="font-black text-sm text-slate-200">
                   @{golfer.name.replace(/\s+/g, '')}
                 </span>
@@ -217,6 +219,14 @@ export default function ChirpsView({ onBack }) {
           </button>
         </form>
       </div>
+
+      {/* MOBILE DIAGNOSTIC TRAY */}
+      {showUiDebugger && (
+        <div className="bg-black text-[11px] p-2.5 font-mono text-emerald-400 border-t border-emerald-500/20 max-h-24 overflow-y-auto select-all shrink-0">
+          <span className="text-slate-500 font-bold mr-1">[MOBILE LOGGER]:</span> 
+          {debugLog}
+        </div>
+      )}
 
     </div>
   );
