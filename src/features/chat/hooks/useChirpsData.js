@@ -6,14 +6,13 @@ export function useChirpsData() {
   const context = useUser() || {};
   const currentUser = context.player || context.user || {};
   
-  // Directly targeting your authentication session string
   const sessionAuthId = currentUser.auth_id || currentUser.user_id || currentUser.id;
   const sessionName = currentUser.name || currentUser.username || 'Anonymous';
   const sessionTeam = currentUser.team || '';
 
   const [chirps, setChirps] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [debugLog, setDebugLog] = useState('Initializing Restructured Engine...');
+  const [debugLog, setDebugLog] = useState('Initializing Engine...');
 
   const channelRef = useRef(null);
   const userSessionRef = useRef({ id: sessionAuthId, name: sessionName, team: sessionTeam });
@@ -24,14 +23,12 @@ export function useChirpsData() {
 
   const formatChirp = (item) => {
     const isBotNotification = !item.user_id || item.message?.startsWith('[BROADCAST]');
-    
     return {
       id: item.id || Math.random().toString(36).substr(2, 9),
       text: item.message || '',
       timestamp: new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       sender: isBotNotification ? 'BROADCAST BOT' : (item.sender_name || 'Anonymous'),
       team: isBotNotification ? 'Tournament Officials' : (item.sender_team || ''),
-      avatar: '',
       isBot: isBotNotification
     };
   };
@@ -40,7 +37,7 @@ export function useChirpsData() {
     let isMounted = true;
 
     if (!sessionAuthId) {
-      setDebugLog('⚠️ Mobile Context Hold: Waiting for device login token...');
+      setDebugLog('⚠️ Waiting for valid User ID configuration...');
       setLoading(false);
       return;
     }
@@ -48,9 +45,8 @@ export function useChirpsData() {
     async function initializeChatEngine() {
       try {
         setLoading(true);
-        setDebugLog(`Fetching historical data via verified User ID Column...`);
+        setDebugLog('Synchronizing database feed...');
 
-        // Fetch logs utilizing the corrected table structure
         const { data: historicalChirps, error: chirpsErr } = await supabase
           .from('chirps')
           .select('id, message, created_at, user_id, sender_name, sender_team')
@@ -58,20 +54,20 @@ export function useChirpsData() {
           .limit(50);
 
         if (chirpsErr) {
-          setDebugLog(`❌ Database Schema Rejection: ${chirpsErr.message}`);
+          setDebugLog(`❌ Query Denied: ${chirpsErr.message}`);
           if (isMounted) setLoading(false);
           return;
         }
 
         if (historicalChirps && isMounted) {
           setChirps(historicalChirps.map(formatChirp));
-          setDebugLog(`🚀 Online. Database corrected & synchronized.`);
+          setDebugLog('🚀 System online and active.');
         }
 
-        // Connect real-time channels
         channelRef.current = supabase
-          .channel('live-chirps')
+          .channel('live-chirps-feed')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
+            if (!isMounted) return;
             const formatted = formatChirp(payload.new);
             setChirps(prev => {
               if (prev.some(c => c.id === formatted.id)) return prev;
@@ -79,11 +75,11 @@ export function useChirpsData() {
             });
           })
           .subscribe((status) => {
-            if (status === 'SUBSCRIBED') setDebugLog(`✅ Realtime Pipeline Connected.`);
+            if (status === 'SUBSCRIBED') setDebugLog('✅ Live channel active.');
           });
 
       } catch (err) {
-        setDebugLog(`💥 Initialization Crash: ${err.message}`);
+        setDebugLog(`💥 Crash: ${err.message}`);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -99,17 +95,17 @@ export function useChirpsData() {
 
   const sendChirp = async (textString) => {
     if (!userSessionRef.current.id) {
-      setDebugLog('❌ Send Denied: Missing sessionAuthId.');
+      setDebugLog('❌ Cancelled Send: Session user_id is missing.');
       return;
     }
 
     try {
-      setDebugLog(`Pushing row directly into corrected user_id column...`);
+      setDebugLog('Sending message data...');
       
       const { data, error } = await supabase
         .from('chirps')
         .insert({
-          user_id: userSessionRef.current.id, // Successfully pointed to the newly re-linked database column
+          user_id: userSessionRef.current.id,
           message: textString.trim(),
           sender_name: userSessionRef.current.name,
           sender_team: userSessionRef.current.team
@@ -117,13 +113,13 @@ export function useChirpsData() {
         .select();
 
       if (error) {
-        setDebugLog(`❌ DB Reject: ${error.message} (Code: ${error.code})`);
+        setDebugLog(`❌ Reject: ${error.message} (Code: ${error.code})`);
         return;
       }
 
-      setDebugLog(`✅ Message written successfully!`);
+      setDebugLog('✅ Message saved successfully!');
     } catch (err) {
-      setDebugLog(`💥 Thread Level Write Error: ${err.message}`);
+      setDebugLog(`💥 Thread error: ${err.message}`);
     }
   };
 
@@ -135,7 +131,7 @@ export function useChirpsData() {
         sender_team: 'Tournament Officials'
       });
     } catch (e) {
-      setDebugLog(`💥 Broadcast failure: ${e.message}`);
+      setDebugLog(`💥 Broadcast err: ${e.message}`);
     }
   };
 
