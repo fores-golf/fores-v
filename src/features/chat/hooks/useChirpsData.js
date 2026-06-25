@@ -3,13 +3,17 @@ import { supabase } from '../../../config/supabaseClient';
 import { useUser } from '../../../context/UserContext';
 
 export function useChirpsData() {
-  const { player } = useUser();
+  // Extract and safeguard user identity handles
+  const context = useUser() || {};
+  const fallbackUser = context.user || context.player || {};
+  const resolvedUserId = fallbackUser.auth_id || fallbackUser.user_id || fallbackUser.id;
+
   const [chirps, setChirps] = useState([]);
   const [golfers, setGolfers] = useState([]); 
   const [loading, setLoading] = useState(true);
   
-  // Real-time troubleshooting log for mobile testing
-  const [debugLog, setDebugLog] = useState('System initialized. Waiting for action...');
+  // Mobile diagnostics message stream
+  const [debugLog, setDebugLog] = useState('Initializing Chirps Engine...');
 
   const golfersRef = useRef([]);
   const channelRef = useRef(null);
@@ -18,17 +22,17 @@ export function useChirpsData() {
     golfersRef.current = golfers;
   }, [golfers]);
 
-  const formatChirp = (item, derivedProfiles) => {
+  // Clean payload formatting handler
+  const formatChirp = (item, derivedProfile) => {
     const isBotNotification = !item.profile_id || item.message?.startsWith('[BROADCAST]');
-    const profile = derivedProfiles || item.profiles;
     
     return {
       id: item.id || Math.random().toString(36).substr(2, 9),
       text: item.message || '',
       timestamp: new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      sender: isBotNotification ? 'BROADCAST BOT' : (profile?.name || 'Anonymous'),
-      team: isBotNotification ? 'Tournament Officials' : (profile?.team || ''),
-      avatar: profile?.avatar_url || '',
+      sender: isBotNotification ? 'BROADCAST BOT' : (derivedProfile?.name || 'Anonymous'),
+      team: isBotNotification ? 'Tournament Officials' : (derivedProfile?.team || ''),
+      avatar: derivedProfile?.avatar_url || '',
       isBot: isBotNotification
     };
   };
@@ -36,33 +40,53 @@ export function useChirpsData() {
   useEffect(() => {
     let isMounted = true;
 
+    if (!resolvedUserId) {
+      setDebugLog('⚠️ Mobile Check: No active player identity found in UserContext.');
+      setLoading(false);
+      return;
+    }
+
     async function initializeChatEngine() {
       try {
         setLoading(true);
-        setDebugLog('Fetching golfers and historical logs...');
+        setDebugLog(`Connecting to Supabase... User ID detected: ${resolvedUserId}`);
 
-        // 1. Fetch Profiles
+        // 1. Fetch Golfer/Profile Maps
         const { data: golfersData, error: profileErr } = await supabase
           .from('profiles')
           .select('id, name, team, avatar_url');
         
-        if (profileErr) throw new Error(`Profiles Fetch Error: ${profileErr.message}`);
+        if (profileErr) {
+          setDebugLog(`❌ Profiles Table Failure: ${profileErr.message}`);
+          if (isMounted) setLoading(false);
+          return;
+        }
         if (golfersData && isMounted) setGolfers(golfersData);
 
-        // 2. Fetch last 50 chirps
+        // 2. Fetch Flat Chirp Feed (Avoid relationship joins to prevent schema-mismatch errors)
         const { data: historicalChirps, error: chirpsErr } = await supabase
           .from('chirps')
-          .select('id, message, created_at, profile_id, profiles(name, team, avatar_url)')
+          .select('id, message, created_at, profile_id')
           .order('created_at', { ascending: true })
           .limit(50);
 
-        if (chirpsErr) throw new Error(`Chirps Fetch Error: ${chirpsErr.message}`);
-        if (historicalChirps && isMounted) {
-          setChirps(historicalChirps.map(item => formatChirp(item, null)));
-          setDebugLog(`Successfully loaded ${historicalChirps.length} historical chirps.`);
+        if (chirpsErr) {
+          setDebugLog(`❌ Chirps Table Failure: ${chirpsErr.message}`);
+          if (isMounted) setLoading(false);
+          return;
         }
 
-        // 3. Real-time Subscription Channel
+        if (historicalChirps && isMounted) {
+          // Manually stitch profiles from local memory mapping
+          const mappedChirps = historicalChirps.map(item => {
+            const prof = (golfersData || []).find(g => g.id === item.profile_id);
+            return formatChirp(item, prof);
+          });
+          setChirps(mappedChirps);
+          setDebugLog(`🚀 Online. Sync complete: ${historicalChirps.length} messages loaded.`);
+        }
+
+        // 3. Mount Realtime Pipeline Broadcast
         channelRef.current = supabase
           .channel('live-chirps')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
@@ -74,87 +98,67 @@ export function useChirpsData() {
               profile_id: payload.new.profile_id
             }, matchingProfile);
 
-            // Push Notifications Gateway
-            if (payload.new.profile_id !== (player?.id || player?.auth_id) && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification(`💥 Chirp from ${formatted.sender}`, {
-                body: formatted.text.startsWith('[BROADCAST]') ? formatted.text.replace('[BROADCAST]', '').trim() : formatted.text,
-                icon: formatted.avatar || '/fores-v-logo.png'
-              });
-            }
-
             setChirps(prev => {
               if (prev.some(c => c.id === formatted.id)) return prev;
               return [...prev, formatted];
             });
           })
           .subscribe((status) => {
-            setDebugLog(`Realtime subscription status: ${status}`);
+            if (status === 'SUBSCRIBED') {
+              setDebugLog(`✅ Realtime Pipeline Established.`);
+            } else {
+              setDebugLog(`Pipeline Network Status: ${status}`);
+            }
           });
 
       } catch (err) {
-        setDebugLog(`💥 Init Error: ${err.message}`);
-        console.error(err);
+        setDebugLog(`💥 Critical Initialization Exception: ${err.message}`);
       } finally {
         if (isMounted) setLoading(false);
       }
     }
 
-    // Support standard database profile IDs or standard Supabase auth handles
-    const targetUserId = player?.id || player?.auth_id;
-    if (targetUserId) {
-      initializeChatEngine();
-    } else {
-      setDebugLog('⚠️ Blocked Engine: No valid player.id or player.auth_id detected in context.');
-      setLoading(false);
-    }
+    initializeChatEngine();
 
     return () => {
       isMounted = false;
       if (channelRef.current) supabase.removeChannel(channelRef.current);
     };
-  }, [player?.id, player?.auth_id]);
+  }, [resolvedUserId]);
 
   const sendChirp = async (textString) => {
-    // Dynamic fallbacks to catch exact variations of identity providers
-    const activeUserId = player?.id || player?.auth_id;
-    
-    setDebugLog(`Attempting to send. Message length: ${textString?.length}. User ID: ${activeUserId}`);
-
-    if (!activeUserId) {
-      setDebugLog('❌ Send blocked: Both player.id and player.auth_id are missing.');
+    if (!resolvedUserId) {
+      setDebugLog('❌ Send Denied: Identity missing.');
       return;
     }
 
     try {
+      setDebugLog(`Dispatching payload message...`);
+      
       const { data, error } = await supabase
         .from('chirps')
         .insert({
-          profile_id: activeUserId, // Fallback hooks maps perfectly here
+          profile_id: resolvedUserId, 
           message: textString.trim()
         })
         .select();
 
       if (error) {
-        setDebugLog(`❌ Database Reject: ${error.message} (Code: ${error.code})`);
+        setDebugLog(`❌ Supabase Database Reject: ${error.message} (Code: ${error.code})`);
         return;
       }
 
-      setDebugLog(`✅ Successfully saved! Payload ID: ${data?.[0]?.id || 'unknown'}`);
+      setDebugLog(`✅ Message written successfully!`);
     } catch (err) {
-      setDebugLog(`💥 Catch Exception: ${err.message}`);
+      setDebugLog(`💥 Thread Level Exception: ${err.message}`);
     }
   };
 
   const sendSystemBroadcast = async (announcementText) => {
     try {
-      setDebugLog(`Sending system alert...`);
-      const { error } = await supabase
-        .from('chirps')
-        .insert({ message: `[BROADCAST] ${announcementText}` });
-
-      if (error) setDebugLog(`❌ Broadcast err: ${error.message}`);
+      await supabase.from('chirps').insert({ message: `[BROADCAST] ${announcementText}` });
     } catch (e) {
-      setDebugLog(`💥 Broadcast exception: ${e.message}`);
+      setDebugLog(`💥 Broadcast Err: ${e.message}`);
     }
   };
 
