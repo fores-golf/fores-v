@@ -141,4 +141,22 @@ export function useChirpsData() {
 
       setDebugLog(`✅ Successfully saved! Payload ID: ${data?.[0]?.id || 'unknown'}`);
     } catch (err) {
-      setDebugLog(`💥 Catch
+      setDebugLog(`💥 Catch Exception: ${err.message}`);
+    }
+  };
+
+  const sendSystemBroadcast = async (announcementText) => {
+    try {
+      setDebugLog(`Sending system alert...`);
+      const { error } = await supabase
+        .from('chirps')
+        .insert({ message: `[BROADCAST] ${announcementText}` });
+
+      if (error) setDebugLog(`❌ Broadcast err: ${error.message}`);
+    } catch (e) {
+      setDebugLog(`💥 Broadcast exception: ${e.message}`);
+    }
+  };
+
+  return { chirps, golfers, loading, sendChirp, sendSystemBroadcast, debugLog };
+}
