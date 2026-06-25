@@ -11,10 +11,10 @@ export function useChirpsData() {
   const sessionTeam = currentUser.team || '';
 
   const [chirps, setChirps] = useState([]);
-  const [golfers, setGolfers] = useState([]); // Restored for autocomplete tracking
+  const [golfers, setGolfers] = useState([]); // Directory pool used to drive search tags
   const [loading, setLoading] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState('default');
-  const [debugLog, setDebugLog] = useState('Initializing Feature Pack...');
+  const [debugLog, setDebugLog] = useState('Initializing Autocomplete Engine...');
 
   const channelRef = useRef(null);
   const userSessionRef = useRef({ id: sessionAuthId, name: sessionName, team: sessionTeam });
@@ -23,7 +23,6 @@ export function useChirpsData() {
     userSessionRef.current = { id: sessionAuthId, name: sessionName, team: sessionTeam };
   }, [sessionAuthId, sessionName, sessionTeam]);
 
-  // Read active platform permission state on mount
   useEffect(() => {
     if ('Notification' in window) {
       setNotificationPermission(Notification.permission);
@@ -64,18 +63,25 @@ export function useChirpsData() {
     async function initializeChatEngine() {
       try {
         setLoading(true);
-        setDebugLog('Caching directory & historic feeds...');
+        setDebugLog('Caching directory mapping rules...');
 
-        // 1. Safe fetch of participant directories for autocomplete mapping
-        // NOTE: If you use a table other than 'profiles' for users, change the table string here!
-        const { data: golfersData } = await supabase
+        // 🎯 FIX: Pull name, team, and auth identity configurations down into local app memory
+        // If your player context maps identity to a unique directory table, change 'profiles' here.
+        const { data: golfersData, error: golfersErr } = await supabase
           .from('profiles')
-          .select('id, name, team')
-          .throwOnError();
+          .select('id, name, team, auth_id, user_id');
         
-        if (golfersData && isMounted) setGolfers(golfersData);
+        if (!golfersErr && golfersData && isMounted) {
+          // Normalize the array items so the view can scan cross-platform identity values seamlessly
+          const normalizedGolfers = golfersData.map(g => ({
+            id: g.auth_id || g.user_id || g.id, // Fallback chain normalizes everything to match your session id format
+            name: g.name || 'Unknown Golfer',
+            team: g.team || 'Free Agent'
+          }));
+          setGolfers(normalizedGolfers);
+        }
 
-        // 2. Load historic chat items
+        // Load chat lines
         const { data: historicalChirps, error: chirpsErr } = await supabase
           .from('chirps')
           .select('id, message, created_at, user_id, sender_name, sender_team')
@@ -93,22 +99,22 @@ export function useChirpsData() {
           setDebugLog('🚀 System active. Live streams established.');
         }
 
-        // 3. Mount Stream Subscription Pipeline
+        // Live Realtime Stream Listener Configuration
         channelRef.current = supabase
           .channel('live-chirps-feed')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
             if (!isMounted) return;
             const formatted = formatChirp(payload.new);
 
-            // 🎯 NATIVE PUSH NOTIFICATION DISPATCHER
-            // Alert rules: Ensure it wasn't sent by yourself, and verify system permissions are enabled
+            // 🎯 FIXED REALTIME PUSH NOTIFICATIONS FOR MENTIONS
             if (payload.new.user_id !== userSessionRef.current.id && 'Notification' in window && Notification.permission === 'granted') {
               const cleanText = formatted.text.replace('[BROADCAST]', '').trim();
-              const standardCleanName = userSessionRef.current.name.replace(/\s+/g, '').toLowerCase();
               
-              // Only trigger banner if it's a general official broadcast or if the player's clean username gets tagged
-              if (formatted.isBot || cleanText.toLowerCase().includes(`@${standardCleanName}`)) {
-                new Notification(`💥 Trash Talk Alert from ${formatted.sender}`, {
+              // Standardize active user name string for tag comparison matching (e.g. "@mickeysalva")
+              const standardCleanTag = `@${userSessionRef.current.name.replace(/\s+/g, '').toLowerCase()}`;
+              
+              if (formatted.isBot || cleanText.toLowerCase().includes(standardCleanTag)) {
+                new Notification(`💥 Trash Talk from ${formatted.sender}`, {
                   body: cleanText,
                   icon: '/favicon.ico'
                 });
@@ -139,7 +145,7 @@ export function useChirpsData() {
 
   const sendChirp = async (textString) => {
     if (!userSessionRef.current.id) {
-      setDebugLog('❌ Cancelled Send: Missing authentication session token.');
+      setDebugLog('❌ Cancelled Send: Missing authentication token.');
       return;
     }
 
