@@ -17,49 +17,42 @@ export function useChirpsNotification(isOpen) {
 
         if (error) throw error;
         if (data) {
-          const msgTime = new Date(data.created_at).getTime();
-          setLatestMessageTime(msgTime);
+          setLatestMessageTime(new Date(data.created_at).getTime());
         }
       } catch (err) {
-        console.error('Error fetching chat notification bookmark:', err.message);
+        console.error('Error fetching chat alert markers:', err.message);
       }
     }
     fetchLatestTimestamp();
-  }, []);
+  }, [isOpen]); // Re-verify whenever user leaves or enters the view context
 
   useEffect(() => {
-    const chatSubscription = supabase
-      .channel('chirp-notification-sync')
+    // Shared globally with the main pipeline namespace to prevent thread locks
+    const notificationSubscription = supabase
+      .channel('live-chirps-feed') 
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
-        if (payload.new && payload.new.created_at) {
+        if (payload.new?.created_at) {
           setLatestMessageTime(new Date(payload.new.created_at).getTime());
         }
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(chatSubscription);
+      supabase.removeChannel(notificationSubscription);
     };
   }, []);
 
   useEffect(() => {
     const lastReadTime = parseInt(localStorage.getItem('f5_last_read_chirps') || '0', 10);
-    
-    if (latestMessageTime > lastReadTime) {
-      setHasUnread(true);
-    } else {
-      setHasUnread(false);
-    }
+    setHasUnread(latestMessageTime > lastReadTime);
   }, [latestMessageTime]);
 
-  // 🎯 FIX: Wipes read alerts appropriately when the context window is focused/open
   useEffect(() => {
     if (isOpen) {
-      const now = Date.now();
-      localStorage.setItem('f5_last_read_chirps', now.toString());
+      localStorage.setItem('f5_last_read_chirps', Date.now().toString());
       setHasUnread(false);
     }
-  }, [isOpen]);
+  }, [isOpen, latestMessageTime]);
 
   return hasUnread;
 }
