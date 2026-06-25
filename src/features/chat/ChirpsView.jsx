@@ -2,8 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useChirpsData } from './hooks/useChirpsData';
 
 export default function ChirpsView({ onBack }) {
-  const { chirps, loading, sendChirp, sendSystemBroadcast, debugLog } = useChirpsData();
+  const { 
+    chirps, 
+    golfers, 
+    loading, 
+    sendChirp, 
+    sendSystemBroadcast, 
+    notificationPermission, 
+    requestPlatformPermissions, 
+    debugLog 
+  } = useChirpsData();
+
   const [typedMessage, setTypedMessage] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const feedEndRef = useRef(null);
 
   useEffect(() => {
@@ -12,6 +24,33 @@ export default function ChirpsView({ onBack }) {
     }, 120);
     return () => clearTimeout(timeoutId);
   }, [chirps]);
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setTypedMessage(val);
+
+    const words = val.split(' ');
+    const lastWord = words[words.length - 1];
+
+    // Trigger lookup suggestions only if current string fragment starts with '@'
+    if (lastWord.startsWith('@') && lastWord.length > 1) {
+      const query = lastWord.substring(1).toLowerCase();
+      const filtered = golfers.filter(g => g.name?.toLowerCase().includes(query));
+      setSuggestions(filtered);
+      setShowSuggestions(filtered.length > 0);
+    } else {
+      setShowSuggestions(false);
+    }
+  };
+
+  const handleSelectGolfer = (name) => {
+    const words = typedMessage.split(' ');
+    words.pop(); // Clear out the broken input prefix query fragment
+    const formattedName = name.replace(/\s+/g, ''); 
+    words.push(`@${formattedName} `); // Append clean tagged identifier string
+    setTypedMessage(words.join(' '));
+    setShowSuggestions(false);
+  };
 
   const handleSend = (e) => {
     e.preventDefault();
@@ -59,7 +98,22 @@ export default function ChirpsView({ onBack }) {
         <div className="w-9 h-5 pointer-events-none" />
       </div>
 
-      {/* MESSAGES WINDOW */}
+      {/* UX IMPROVEMENT: SYSTEM PUSH NOTIFICATION PERMISSION BANNER */}
+      {notificationPermission === 'default' && (
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-4 py-2.5 flex justify-between items-center shrink-0 shadow-lg z-10 animate-fade-in">
+          <p className="text-[11px] font-bold tracking-tight text-white/90">
+            🔔 Never miss when you get chirped at! Enable mobile alerts.
+          </p>
+          <button 
+            onClick={requestPlatformPermissions} 
+            className="bg-white text-indigo-700 font-black text-[10px] uppercase tracking-wider px-3 py-1 rounded-lg shadow active:scale-95 transition-transform"
+          >
+            Enable
+          </button>
+        </div>
+      )}
+
+      {/* MESSAGES LAYER CONTAINER */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4 scrolling-touch">
         {loading ? (
           <div className="h-full w-full flex items-center justify-center">
@@ -68,7 +122,7 @@ export default function ChirpsView({ onBack }) {
         ) : chirps.length === 0 ? (
           <div className="h-full w-full flex flex-col items-center justify-center text-slate-500 gap-2">
             <span className="text-2xl">💬</span>
-            <p className="text-xs font-semibold">No active chirps yet.</p>
+            <p className="text-xs font-semibold">No active chirps. Send a message to get started!</p>
           </div>
         ) : (
           chirps.map((chirp) => {
@@ -104,14 +158,34 @@ export default function ChirpsView({ onBack }) {
         <div ref={feedEndRef} />
       </div>
 
-      {/* INPUT SYSTEM */}
+      {/* ACTION CONTROLS / INPUT SYSTEM */}
       <div className="p-4 bg-[#0f172a]/95 backdrop-blur-xl border-t border-white/5 shrink-0 relative pb-safe">
+        
+        {/* Dynamic Lookup Dropdown Menu Container */}
+        {showSuggestions && (
+          <div className="absolute bottom-full left-4 right-4 bg-[#1e293b] rounded-2xl border border-white/10 shadow-2xl max-h-40 overflow-y-auto mb-2 divide-y divide-white/5 z-20">
+            {suggestions.map((golfer) => (
+              <button
+                key={golfer.id}
+                type="button"
+                onClick={() => handleSelectGolfer(golfer.name)}
+                className="w-full text-left p-3 flex justify-between items-center hover:bg-white/5 text-white"
+              >
+                <span className="font-black text-sm">@{golfer.name.replace(/\s+/g, '')}</span>
+                <span className="text-[9px] font-extrabold px-2 py-0.5 rounded border border-white/10 bg-slate-800">
+                  {golfer.team || 'Free Agent'}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <form onSubmit={handleSend} className="flex gap-2 max-w-md mx-auto">
           <input
             type="text"
             value={typedMessage}
-            onChange={(e) => setTypedMessage(e.target.value)}
-            placeholder="Chirp at the other group..."
+            onChange={handleInputChange}
+            placeholder="Chirp at the other group... type @ to tag"
             className="flex-1 bg-black/40 border border-white/5 rounded-2xl p-4 text-sm font-semibold text-white focus:outline-none focus:border-[#34d399]/40 transition-colors"
           />
           <button
@@ -126,7 +200,7 @@ export default function ChirpsView({ onBack }) {
         </form>
       </div>
 
-      {/* ON-SCREEN MONITOR */}
+      {/* CONSOLE DEBUG PANEL */}
       <div className="bg-slate-950 text-[10px] p-2 font-mono text-amber-400 border-t border-white/10 shrink-0 max-h-16 overflow-y-auto">
         <span className="text-slate-500 font-bold mr-1">[MOBILE STATUS]:</span> 
         {debugLog}
