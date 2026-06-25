@@ -7,51 +7,75 @@ export function useChirpsData() {
   const [chirps, setChirps] = useState([]);
   const [golfers, setGolfers] = useState([]); 
   const [loading, setLoading] = useState(true);
+  
+  // Use refs to store latest state arrays to prevent real-time event listener closures from becoming stale
+  const golfersRef = useRef([]);
   const channelRef = useRef(null);
 
+  // Sync ref with state updates
   useEffect(() => {
+    golfersRef.current = golfers;
+  }, [golfers]);
+
+  // Helper formatting function isolated from closure traps
+  const formatChirp = (item, derivedProfiles) => {
+    const isBotNotification = !item.profile_id || item.message.startsWith('[BROADCAST]');
+    const profile = derivedProfiles || item.profiles;
+    
+    return {
+      id: item.id || Math.random().toString(36).substr(2, 9),
+      text: item.message,
+      timestamp: new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sender: isBotNotification ? 'BROADCAST BOT' : (profile?.name || 'Anonymous'),
+      team: isBotNotification ? 'Tournament Officials' : (profile?.team || ''),
+      avatar: profile?.avatar_url || '',
+      isBot: isBotNotification
+    };
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
     async function initializeChatEngine() {
       try {
         setLoading(true);
 
+        // 1. Grab all profile/golfer metadata
         const { data: golfersData } = await supabase
           .from('profiles')
-          .select('id, name, team');
-        if (golfersData) setGolfers(golfersData);
+          .select('id, name, team, avatar_url');
+        
+        if (golfersData && isMounted) {
+          setGolfers(golfersData);
+        }
 
+        // 2. Fetch last 50 historical messages
         const { data: historicalChirps, error } = await supabase
           .from('chirps')
           .select('id, message, created_at, profile_id, profiles(name, team, avatar_url)')
           .order('created_at', { ascending: true })
           .limit(50);
 
-        if (!error && historicalChirps) {
-          setChirps(historicalChirps.map(formatChirp));
+        if (!error && historicalChirps && isMounted) {
+          setChirps(historicalChirps.map(item => formatChirp(item, null)));
         }
 
+        // 3. Setup real-time channel subscription
         channelRef.current = supabase
           .channel('live-chirps')
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, async (payload) => {
-            let profileData = null;
-
-            if (payload.new.profile_id) {
-              const { data } = await supabase
-                .from('profiles')
-                .select('name, team, avatar_url')
-                .eq('id', payload.new.profile_id)
-                .single();
-              profileData = data;
-            }
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
+            
+            // OPTIMIZATION: Look up profile instantly via local reference map instead of making an async DB query on every message stream
+            const matchingProfile = golfersRef.current.find(g => g.id === payload.new.profile_id);
 
             const formatted = formatChirp({
               id: payload.new.id,
               message: payload.new.message,
               created_at: payload.new.created_at,
-              profiles: profileData,
               profile_id: payload.new.profile_id
-            });
+            }, matchingProfile);
 
-            // 🎯 PUSH NOTIFICATIONS GATEWAY: Trigger OS level banner alert
+            // 🎯 PUSH NOTIFICATIONS GATEWAY
             if (payload.new.profile_id !== player?.id && 'Notification' in window && Notification.permission === 'granted') {
               new Notification(`💥 Chirp from ${formatted.sender}`, {
                 body: formatted.text.startsWith('[BROADCAST]') ? formatted.text.replace('[BROADCAST]', '').trim() : formatted.text,
@@ -59,14 +83,18 @@ export function useChirpsData() {
               });
             }
 
-            setChirps(prev => [...prev, formatted]);
+            // Deduplicate safety check
+            setChirps(prev => {
+              if (prev.some(c => c.id === formatted.id)) return prev;
+              return [...prev, formatted];
+            });
           })
           .subscribe();
 
       } catch (err) {
         console.error('Chat engine initialization failure:', err.message);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     }
 
@@ -75,23 +103,12 @@ export function useChirpsData() {
     }
 
     return () => {
-      if (channelRef.current) supabase.removeChannel(channelRef.current);
+      isMounted = false;
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+      }
     };
   }, [player?.id]);
-
-  const formatChirp = (item) => {
-    const isBotNotification = !item.profile_id || item.message.startsWith('[BROADCAST]');
-    
-    return {
-      id: item.id,
-      text: item.message,
-      timestamp: new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      sender: isBotNotification ? 'BROADCAST BOT' : (item.profiles?.name || 'Anonymous'),
-      team: isBotNotification ? 'Tournament Officials' : (item.profiles?.team || ''),
-      avatar: item.profiles?.avatar_url || '',
-      isBot: isBotNotification
-    };
-  };
 
   const sendChirp = async (textString) => {
     try {
