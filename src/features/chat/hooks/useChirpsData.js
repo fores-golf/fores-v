@@ -11,7 +11,7 @@ export function useChirpsData() {
   const sessionTeam = currentUser.team || '';
 
   const [chirps, setChirps] = useState([]);
-  const [golfers, setGolfers] = useState([]); // Directory pool used to drive search tags
+  const [golfers, setGolfers] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [notificationPermission, setNotificationPermission] = useState('default');
   const [debugLog, setDebugLog] = useState('Initializing Autocomplete Engine...');
@@ -30,13 +30,9 @@ export function useChirpsData() {
   }, []);
 
   const requestPlatformPermissions = async () => {
-    if (!('Notification' in window)) {
-      setDebugLog('⚠️ Notifications not supported on this mobile browser.');
-      return;
-    }
+    if (!('Notification' in window)) return;
     const permission = await Notification.requestPermission();
     setNotificationPermission(permission);
-    setDebugLog(`Notification permission: ${permission}`);
   };
 
   const formatChirp = (item) => {
@@ -63,25 +59,30 @@ export function useChirpsData() {
     async function initializeChatEngine() {
       try {
         setLoading(true);
-        setDebugLog('Caching directory mapping rules...');
+        setDebugLog('Loading player directories...');
 
-        // 🎯 FIX: Pull name, team, and auth identity configurations down into local app memory
-        // If your player context maps identity to a unique directory table, change 'profiles' here.
-        const { data: golfersData, error: golfersErr } = await supabase
-          .from('profiles')
-          .select('id, name, team, auth_id, user_id');
-        
-        if (!golfersErr && golfersData && isMounted) {
-          // Normalize the array items so the view can scan cross-platform identity values seamlessly
-          const normalizedGolfers = golfersData.map(g => ({
-            id: g.auth_id || g.user_id || g.id, // Fallback chain normalizes everything to match your session id format
-            name: g.name || 'Unknown Golfer',
-            team: g.team || 'Free Agent'
-          }));
-          setGolfers(normalizedGolfers);
+        let compiledDirectory = [];
+
+        // 🎰 TARGET DIRECTORY FIX: Safely pulling fields from your 'players' table
+        try {
+          const { data: playersData } = await supabase
+            .from('players')
+            .select('id, name, team, auth_id, user_id')
+            .limit(150);
+          
+          if (playersData && playersData.length > 0) {
+            compiledDirectory = playersData.map(p => ({
+              id: p.auth_id || p.user_id || p.id,
+              name: p.name || 'Unknown Golfer',
+              team: p.team || 'Free Agent'
+            }));
+            setDebugLog(`Directory loaded from 'players' table (${playersData.length} records).`);
+          }
+        } catch (e) {
+          console.warn('Players table read error, enabling backup fallback:', e.message);
         }
 
-        // Load chat lines
+        // 2. Fetch Chat History
         const { data: historicalChirps, error: chirpsErr } = await supabase
           .from('chirps')
           .select('id, message, created_at, user_id, sender_name, sender_team')
@@ -94,23 +95,51 @@ export function useChirpsData() {
           return;
         }
 
-        if (historicalChirps && isMounted) {
-          setChirps(historicalChirps.map(formatChirp));
-          setDebugLog('🚀 System active. Live streams established.');
+        if (historicalChirps) {
+          // 🎰 BACKUP AUTOMATIC FALLBACK: If the players table is empty or missing columns, build directory from historical chat rows
+          if (compiledDirectory.length === 0) {
+            const uniqueUsersMap = new Map();
+            historicalChirps.forEach(c => {
+              if (c.user_id && c.sender_name && c.sender_name !== 'BROADCAST BOT') {
+                uniqueUsersMap.set(c.user_id, {
+                  id: c.user_id,
+                  name: c.sender_name,
+                  team: c.sender_team || 'Free Agent'
+                });
+              }
+            });
+            compiledDirectory = Array.from(uniqueUsersMap.values());
+            setDebugLog(`Directory localized via history (${compiledDirectory.length} active players).`);
+          }
+
+          if (isMounted) {
+            setChirps(historicalChirps.map(formatChirp));
+            setGolfers(compiledDirectory);
+          }
         }
 
-        // Live Realtime Stream Listener Configuration
+        // Realtime Subscription Pipeline
         channelRef.current = supabase
           .channel('live-chirps-feed')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chirps' }, (payload) => {
             if (!isMounted) return;
             const formatted = formatChirp(payload.new);
 
-            // 🎯 FIXED REALTIME PUSH NOTIFICATIONS FOR MENTIONS
+            // Add newly talking players to the autocomplete directory list dynamically
+            if (payload.new.user_id && payload.new.sender_name && payload.new.sender_name !== 'BROADCAST BOT') {
+              setGolfers(prev => {
+                if (prev.some(g => g.id === payload.new.user_id)) return prev;
+                return [...prev, {
+                  id: payload.new.user_id,
+                  name: payload.new.sender_name,
+                  team: payload.new.sender_team || 'Free Agent'
+                }];
+              });
+            }
+
+            // Realtime Push Notification for Mentions Filter
             if (payload.new.user_id !== userSessionRef.current.id && 'Notification' in window && Notification.permission === 'granted') {
               const cleanText = formatted.text.replace('[BROADCAST]', '').trim();
-              
-              // Standardize active user name string for tag comparison matching (e.g. "@mickeysalva")
               const standardCleanTag = `@${userSessionRef.current.name.replace(/\s+/g, '').toLowerCase()}`;
               
               if (formatted.isBot || cleanText.toLowerCase().includes(standardCleanTag)) {
@@ -150,7 +179,6 @@ export function useChirpsData() {
     }
 
     try {
-      setDebugLog('Syncing transmission...');
       const { error } = await supabase
         .from('chirps')
         .insert({
@@ -164,7 +192,6 @@ export function useChirpsData() {
         setDebugLog(`❌ Reject: ${error.message}`);
         return;
       }
-
       setDebugLog('✅ Sent!');
     } catch (err) {
       setDebugLog(`💥 Write Error: ${err.message}`);
